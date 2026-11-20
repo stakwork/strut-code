@@ -1,0 +1,13 @@
+description: >-
+  Take in a repository at its head. Today it only records the commit; a parser
+  plugs in here, before `record`. `check` runs it when a head moved, and `add`
+  once when a repository is added.
+input:
+  url:
+    type: string
+    description: The repository's url, as the list holds it
+steps:
+  - id: record
+    type: record
+    config:
+      url: "{{ input.url }}"

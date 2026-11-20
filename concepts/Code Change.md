@@ -44,12 +44,17 @@ external check): nothing runs it here.
 
 ## 4. A deeper change, on a pod
 
-`stadeum_pods_claim { workspace }` with a workspace the repository is in
-(the one it is main of, unless the request is about another). Then work as
-the `Pod` page says, with the pod tools: make the change, run the app and
-its tests, and look at it in the browser. Commit it on a new branch and
-push with the pod's `git` (`push -u origin <branch>`, with `pr`): that
-opens the pull request.
+Open the `Pod` page (`graph_graph_get { node_type: "Concept", name:
+"Pod" }`) and work as it says, with the pod tools. Claim the pod
+(`stadeum_pods_claim`) for a workspace the repository is in: the one it is
+main of, unless the request is about another. Make the change, run the
+app and its tests, and look at it in the browser. Commit it on a new
+branch and push with the pod's `git` (`push -u origin <branch>`, with
+`pr`): that opens the pull request.
+
+A workspace never set up (the claim gives a bare pod, with no image) is
+set up on the way, as the `Pod` page says. Its `.pod/` goes in a pull
+request of its own, then the change in another. Say so in `text`.
 
 No pod (no `stadeum_pods_claim` among your tools, or the claim fails):
 make the change in a checkout as in 3, and say plainly in `text` that

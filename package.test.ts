@@ -271,6 +271,10 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     // The page's first call, by the name it gives it.
     assert.ok(turn.tools.includes("stadeum_code_repositories"), turn.tools.join(", "));
     assert.ok(turn.tools.includes("git_checkout"), "and strut's checkout");
+    // The deeper path sends it to the `Pod` page, another kind under Job:
+    // it opens a kind's page by name, as its system prompt says.
+    assert.ok(turn.tools.includes("graph_graph_get"), "it can open another page");
+    assert.ok(turn.system.includes('graph_graph_get({ node_type: "Concept", name: "<name>"'), "and is told how");
 
     // A job of no kind opens with no page.
     const plain = await strut.run("job", { prompt: message }, { job: "code-change-none", actor: "ada", principal: "ada" });

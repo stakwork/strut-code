@@ -79,10 +79,15 @@ it acts:
    request (`github/create-pr`). One that turns out deeper moves to a pod,
    and the reply says why.
 4. **A deeper change goes on a pod** from `stadeum/pods`, claimed for the
-   repository's workspace: the app and its tests run there, as its `Pod`
-   page says, and the pod's `git` pushes and opens the pull request.
-   Without the pods package, or when the claim fails, the change is made
-   in the checkout, and the reply says plainly that nothing was run.
+   repository's workspace. The page doesn't restate how to work in a pod:
+   it sends the agent to the pods package's `Pod` page, another kind
+   under `Job`, which it opens by name (`graph_graph_get`, as every job
+   turn's prompt says). The app and its tests run there, and the pod's
+   `git` pushes and opens the pull request. A workspace never set up (a
+   bare pod, no image) is set up on the way, as `Pod` says, its `.pod/`
+   in a pull request of its own. Without the pods package, or when the
+   claim fails, the change is made in the checkout, and the reply says
+   plainly that nothing was run.
 5. **It ends in a pull request as the person**, on a new branch, never a
    push to the default branch; a later turn's change lands in the same
    pull request. When it can't be opened (the person's account for that

@@ -4,7 +4,9 @@
  * checkout of stakwork/strut's main (`STRUT_DIR`, default `../strut`, with
  * its install), on a LadybugDB file. Then driven as the Code app's page
  * drives it (an admin's call and a member's), as the schedule runs `check`,
- * and as the job agent calls `repositories`.
+ * and as the job agent calls `repositories`. A job of the kind `Code Change`
+ * is launched too, to see its turn open with the package's page: the model
+ * is stood in for by an `agent` step that records what the turn gave it.
  *
  * It reaches github.com: the repositories it adds are public ones (this
  * package's own repository and stadeum/pods'), and a missing one stands in
@@ -14,7 +16,7 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -29,6 +31,7 @@ const PODS = "https://github.com/stakwork/strut-pods";
 const MISSING = "https://github.com/stakwork/strut-code-no-such-repository-7f3a";
 const APP = "stadeum/code/code";
 const HEX = /^[0-9a-f]{40}$/;
+const PAGE = "Code Change";
 
 /** Another package, whose app an admin may open, granting this package's
  *  steps and its `add` workflow: it must change nothing. */
@@ -103,6 +106,9 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   let STEP_RUN: string;
   const versions: Record<string, string> = {};
   let store: any;
+  /** What the job agent's model was handed on each turn: the system prompt,
+   *  the turn's prompt and its tools' names. */
+  const turns: Array<{ prompt: string; system: string; tools: string[] }> = [];
 
   /** A call from an app's page (the Code app's unless named), as its viewer: `admin` when strut says so. */
   const page = (actor: string, admin: boolean, app = APP) => {
@@ -132,6 +138,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(run.status, "success", JSON.stringify(run.error));
     return run.output.s ?? run.output;
   };
+  /** The page's text as its file holds it, front matter left out. */
+  const pageText = async () => (await readFile(join(HERE, "concepts", `${PAGE}.md`), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "").trim();
   const repo = async (url: string) => (await list()).repositories.find((r) => r.url === url);
   const space = async (name: string) => (await list()).workspaces.find((w) => w.name === name);
 
@@ -148,6 +156,25 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     STEP_RUN = tools.STEP_RUN_TOOL;
     appIdentity = (await from<any>("auth.ts")).appIdentity;
     const graph = await openGraphBackend({ kind: "ladybug", path: join(root, "graph.lbug"), namespace: PRIVATE_NAMESPACE }, { embeddings: false });
+    // The job agent's model, stood in for through strut's hook on every
+    // model it builds: the call records what the model was handed, and
+    // ends the turn there. A key that is no one's, so nothing reaches a
+    // provider even if the stand-in were skipped.
+    process.env["ANTHROPIC_API_KEY"] = "stand-in";
+    delete process.env["ANTHROPIC_BASE_URL"];
+    const { registerModelWrapper } = await from<any>("extensions.ts");
+    registerModelWrapper((model: object) => {
+      const handed = async (options: { prompt: Array<{ role: string; content: unknown }>; tools?: Array<{ name: string }> }) => {
+        const text = (c: unknown) => (typeof c === "string" ? c : (c as Array<{ text?: string }>).map((p) => p.text ?? "").join(""));
+        turns.push({
+          system: options.prompt.filter((m) => m.role === "system").map((m) => text(m.content)).join("\n"),
+          prompt: text(options.prompt.find((m) => m.role === "user")?.content ?? ""),
+          tools: (options.tools ?? []).map((t) => t.name),
+        });
+        throw new Error("stand-in model: the turn is recorded");
+      };
+      return new Proxy(model, { get: (m, k) => (k === "doGenerate" || k === "doStream" ? handed : Reflect.get(m, k, m)) });
+    });
     strut = await createStrut({
       workspace: new GraphWorkspaceStore(graph, { materializeDir: join(root, "steps"), appsDir: join(root, "apps") }),
       dataDir: root,
@@ -163,7 +190,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
       privacyWorkflows: false,
       mediaWorkflows: false,
       views: false,
-      concepts: false,
+      // Strut's own pages, `Job` among them, which this package's page goes under.
+      concepts: { personal: false, claims: false },
       stt: false,
       jamie: false,
       earnings: false,
@@ -199,7 +227,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.1.0");
+    assert.equal(pkg.version, "0.2.0");
     const job = await strut.workspace.getWorkflow("job");
     assert.ok(job.params.tools.includes("stadeum/code/repositories"), "the job agent is granted the tool");
     const { automations } = await (await strut.app.request("/automations")).json();
@@ -209,6 +237,49 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(check.trigger.every, "interval");
     assert.equal(check.trigger.minutes, 15);
     assert.equal(check.enabled ?? true, true, "on");
+  });
+
+  it("ships the Code Change page under Job, as a kind of job, its text the file's", async () => {
+    const job = await once("job-kinds", "graph/graph-get", { node_type: "Concept", name: "Job", children: "PARENT_OF" });
+    const kind = job.children.find((c: any) => c.name === PAGE);
+    assert.ok(kind, "a kind under Job");
+    assert.match(kind.description, /change the code of one of the box's repositories/);
+    assert.match(kind.description, /Not a question about the code/);
+    const page = await once("code-change-page", "graph/graph-get", { node_type: "Concept", name: PAGE });
+    assert.equal(page.properties.docs.trim(), await pageText());
+  });
+
+  it("opens a Code Change job's turn with the page, the kind listed and the repositories tool granted", async () => {
+    const before = turns.length;
+    const message = "Make the Add button blue.";
+    const run = await strut.run("job", { prompt: message, kind: PAGE }, { job: "code-change-kind", actor: "ada", principal: "ada" });
+    assert.match(JSON.stringify(run.error), /stand-in model/, "the turn reached the model");
+    const turn = turns[before];
+    assert.ok(turn, "the model was called");
+    const { kindLead, kindEnd } = (await strut.workspace.getWorkflow("job")).params;
+    // The job's line, then the kind's page, then the message (after the
+    // agent's own line on its working directory).
+    const head = `Your job id: code-change-kind. ${kindLead}`;
+    const at = turn.prompt.indexOf(head);
+    assert.ok(at >= 0, turn.prompt.slice(0, 300));
+    assert.ok(turn.prompt.endsWith(`${kindEnd}${message}`), turn.prompt.slice(-200));
+    const section = turn.prompt.slice(at + head.length, turn.prompt.length - kindEnd.length - message.length);
+    assert.match(section, /"Code Change" Concept/);
+    assert.ok(section.includes(await pageText()), "the page whole");
+    // Every turn's system prompt lists the kinds under Job, this one among them.
+    assert.match(turn.system, /- Code Change — A request to change the code of one of the box's repositories/);
+    // The page's first call, by the name it gives it.
+    assert.ok(turn.tools.includes("stadeum_code_repositories"), turn.tools.join(", "));
+    assert.ok(turn.tools.includes("git_checkout"), "and strut's checkout");
+    // The deeper path sends it to the `Pod` page, another kind under Job:
+    // it opens a kind's page by name, as its system prompt says.
+    assert.ok(turn.tools.includes("graph_graph_get"), "it can open another page");
+    assert.ok(turn.system.includes('graph_graph_get({ node_type: "Concept", name: "<name>"'), "and is told how");
+
+    // A job of no kind opens with no page.
+    const plain = await strut.run("job", { prompt: message }, { job: "code-change-none", actor: "ada", principal: "ada" });
+    assert.match(JSON.stringify(plain.error), /stand-in model/);
+    assert.ok(turns[before + 1]?.prompt.endsWith(`Your job id: code-change-none. ${message}`), turns[before + 1]?.prompt);
   });
 
   it("shows a member the list and refuses a member's changes", async () => {
@@ -335,5 +406,15 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const back = await repo(CODE);
     assert.deepEqual(back.workspaces, ["strut-code"]);
     assert.equal(back.ingested, back.head);
+  });
+
+  it("goes with the package: the Code Change page, its place under Job and the job's tool", async () => {
+    const res = await strut.app.request("/packages/stadeum/code", { method: "DELETE", headers: { "x-strut-actor": "root" } });
+    assert.equal(res.status, 200, await res.text());
+    const job = await once("job-kinds-after", "graph/graph-get", { node_type: "Concept", name: "Job", children: "PARENT_OF" });
+    assert.equal(job.children.find((c: any) => c.name === PAGE), undefined, "no longer a kind");
+    const gone = await once("code-change-page-after", "graph/graph-get", { node_type: "Concept", name: PAGE });
+    assert.match(String(gone), /node not found: Concept "Code Change"/);
+    assert.ok(!(await strut.workspace.getWorkflow("job")).params.tools.includes("stadeum/code/repositories"));
   });
 });

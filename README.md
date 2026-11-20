@@ -2,8 +2,9 @@
 
 The `stadeum/code` package for [strut](https://github.com/stakwork/strut):
 the repositories a box works on, the workspaces they are grouped in, and
-the Code app where they are set up. It names no forge: any https git
-remote works the same, and a GitLab or Forgejo package would use it whole.
+the Code app where they are set up, and the `Code Change` page, which a job
+that changes one of them follows. It names no forge: any https git remote
+works the same, and a GitLab or Forgejo package would use it whole.
 
 This version reads public repositories only. A private one is refused, with
 the reason, until strut finds a person's git credentials by a remote's host.
@@ -14,6 +15,7 @@ the reason, until strut finds a person's git credentials by a remote's host.
 | --- | --- |
 | `graph/Repository.yaml`, `graph/Workspace.yaml` | The two graph types, and the `Workspace -[INCLUDES]-> Repository` link |
 | `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, how to read a workspace main first) |
+| `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
 | `apps/code/` | **Code**, every person's app: the repositories by workspace, each with its branch and when it was last checked. For an admin it also adds a repository by its https address, removes one, puts one in one workspace or several, and names each workspace's main one |
 | `workflows/add.yaml` | The admin's Add: `add`, then `ingest` once |
 | `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested |
@@ -57,6 +59,46 @@ How it holds together:
 
 It requires no secret, and `git` on the server.
 
+## A Code Change job
+
+A job's `kind` names a page under strut's `Job`, and every turn of the
+job opens with that page (strut's `job` workflow). Strut's orchestrator
+lists the kinds by their descriptions and picks `Code Change` for a
+request to change the code of one of the box's repositories; a question
+about the code is not one. The page tells the job's agent, in the order
+it acts:
+
+1. **Find the repository** with `repositories`: its address, its default
+   branch and its workspaces. With several and none named, it asks.
+2. **Small or deeper.** One test: can a person tell whether the change is
+   right from its diff alone? A colour, a size, a label or wording is
+   small. Anything only running it can judge is deeper.
+3. **A small change needs no pod and no tests** (the owner's rule, as
+   Hive works): strut's `git/checkout` into the job's directory, the
+   edit, then a new branch pushed as the person (`git/push`) and a pull
+   request (`github/create-pr`). One that turns out deeper moves to a pod,
+   and the reply says why.
+4. **A deeper change goes on a pod** from `stadeum/pods`, claimed for the
+   repository's workspace: the app and its tests run there, as its `Pod`
+   page says, and the pod's `git` pushes and opens the pull request.
+   Without the pods package, or when the claim fails, the change is made
+   in the checkout, and the reply says plainly that nothing was run.
+5. **It ends in a pull request as the person**, on a new branch, never a
+   push to the default branch; a later turn's change lands in the same
+   pull request. When it can't be opened (the person's account for that
+   host isn't connected to the box, or can't push there), the reply says
+   so in plain words and hands over the diff.
+
+The page carries no claims or cases yet. Strut records the `claims:` of
+its own pages at boot, not a package's at install, and a case for this
+page would be a coding job, which a trial doesn't run.
+
+**What it needs from strut.** On strut's `main` the job agent is granted
+`git/checkout` but not `git/push` or `github/create-pr`, and a package's
+`job:` grants only its own steps. Until strut grants those two, a small
+change ends with its diff handed over instead of a pull request. A
+deeper change on a pod is not affected: the pod's `git` opens it.
+
 ## Installing it
 
 A box follows the `stable` branch:
@@ -87,7 +129,10 @@ nothing until an admin gives the workflow an owner.
 `package.test.ts` installs this directory into a strut started in the test's
 own process from a checkout of stakwork/strut, on a LadybugDB file, and
 drives it as the Code app (an admin and a member), the schedule and the job
-agent do. It reaches github.com, adding public repositories.
+agent do. It launches a job of the kind `Code Change` and checks that the
+turn opens with the page; the model is stood in for (strut's
+`registerModelWrapper`), so no key is needed. Uninstalling drops the page.
+It reaches github.com, adding public repositories.
 
 ```bash
 STRUT_DIR=../strut npm test

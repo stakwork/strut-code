@@ -1,0 +1,12 @@
+type_description: A git repository the box works on, by its https address. Kept by the stadeum/code package; the Repositories page says what each field holds.
+attributes:
+  url: string
+  name: string
+  branch: ?string
+  head: ?string
+  checked: ?string
+  ingested: ?string
+  problem: ?string
+key_spec: url
+index: [name, url]
+title_key: name

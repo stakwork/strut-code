@@ -1,0 +1,18 @@
+description: >-
+  Add a repository to the box's list by its https address (an admin's, from the
+  Code app), then run `ingest` on it once.
+input:
+  url:
+    type: string
+    description: The repository's https address, such as https://example.com/team/app
+steps:
+  - id: add
+    type: add
+    config:
+      url: "{{ input.url }}"
+  - id: ingest
+    type: subflow
+    config:
+      workflow: ingest
+      input:
+        url: "{{ add.url }}"

@@ -1,0 +1,11 @@
+title: Code
+description: The box's repositories, by workspace, each with its branch and when it was last checked. An admin adds and removes them, and groups them in workspaces.
+icon: folder-git-2
+entry: src/App.tsx
+grants:
+  # `add` checks the address, asks the remote, then runs `ingest` once.
+  workflows: [stadeum/code/add]
+  # Everyone reads the list; the rest are an admin's, and refuse anyone else.
+  steps: [stadeum/code/repositories, stadeum/code/remove, stadeum/code/place, stadeum/code/main]
+  sqlite: false
+  automations: []

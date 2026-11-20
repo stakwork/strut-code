@@ -1,0 +1,9 @@
+type_description: A set of the box's repositories worked on together, one of them its main one. Kept by the stadeum/code package; the Repositories page says what each field holds.
+attributes:
+  name: string
+  main: ?string
+key_spec: name
+index: [name]
+title_key: name
+edges:
+  - [INCLUDES, Repository]

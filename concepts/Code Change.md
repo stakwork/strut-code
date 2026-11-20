@@ -44,11 +44,11 @@ external check): nothing runs it here.
 
 ## 4. A deeper change, on a pod
 
-Open the `Pod` page (`graph_graph_get { node_type: "Concept", name:
-"Pod" }`) and work as it says, with the pod tools. Claim the pod
-(`stadeum_pods_claim`) for a workspace the repository is in: the one it is
-main of, unless the request is about another. Make the change, run the
-app and its tests, and look at it in the browser. Commit it on a new
+Claim a pod (`stadeum_pods_claim`) for a workspace the repository is in:
+the one it is main of, unless the request is about another. Once you hold
+it, open the `Pod` page (`graph_graph_get { node_type: "Concept", name:
+"Pod" }`) and work as it says, with the pod tools. Make the change, run
+the app and its tests, and look at it in the browser. Commit it on a new
 branch and push with the pod's `git` (`push -u origin <branch>`, with
 `pr`): that opens the pull request.
 

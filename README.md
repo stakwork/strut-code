@@ -26,12 +26,17 @@ the reason, until strut finds a person's git credentials by a remote's host.
 
 How it holds together:
 
-- **Admin-only actions in an app everyone opens.** Strut's app door marks a
-  page's call `ctx.app.admin` when its viewer is an admin, and every run the
-  page launches carries it. `repositories` tells the page (`admin`), which
-  draws the admin's controls; `add`, `remove`, `place` and `main` refuse a
-  call without it. A member's call, the job agent and a workflow nobody
-  launched from the page change nothing.
+- **Admin-only actions in an app everyone opens.** Strut's app door names a
+  page's app from the identity it signed for the page (`ctx.app.name`) and
+  marks the call `ctx.app.admin` when its viewer is an admin; every run the
+  page launches carries both. `repositories` tells the page (`admin`), which
+  draws the admin's controls; `add`, `remove`, `place` and `main` change the
+  list only on an admin's call from this package's own Code app
+  (`stadeum/code/code`, not a builder's preview of it). Any app may list
+  these steps among its grants, so an admin's call from another app is
+  refused and says where the list is changed, as strut gives a package's
+  admin scope to its own app alone. A member's call, the job agent and a
+  workflow nobody launched from the Code app change nothing.
 - **The graph through strut's own steps.** The steps write and read through
   `graph/find`, `graph/create-node`, `graph/edit-node`, `graph/delete-node`,
   `graph/create-triplet`, `graph/delete-edge` and `graph/graph-edges`, run

@@ -14,9 +14,9 @@
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { address, remoteProblem, workspaceName, workspaceNames } from "./steps/_code.ts";
 
@@ -29,6 +29,21 @@ const PODS = "https://github.com/stakwork/strut-pods";
 const MISSING = "https://github.com/stakwork/strut-code-no-such-repository-7f3a";
 const APP = "stadeum/code/code";
 const HEX = /^[0-9a-f]{40}$/;
+
+/** Another package, whose app an admin may open, granting this package's
+ *  steps and its `add` workflow: it must change nothing. */
+const OTHER_APP = "acme/other/console";
+const OTHER: Record<string, string> = {
+  "strut.yaml": "package: acme/other\nversion: 0.1.0\n",
+  "apps/console/app.yaml": [
+    "title: Console",
+    "grants:",
+    "  workflows: [stadeum/code/add]",
+    "  steps: [stadeum/code/repositories, stadeum/code/remove, stadeum/code/place, stadeum/code/main]",
+    "",
+  ].join("\n"),
+  "apps/console/src/App.tsx": "export default function App() { return <p>console</p>; }\n",
+};
 
 describe("an address", () => {
   it("is written one way, so the same repository typed twice is one address", () => {
@@ -86,14 +101,14 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   let tools: any;
   let appIdentity: (name: string, version: string) => string;
   let STEP_RUN: string;
-  let version = "";
+  const versions: Record<string, string> = {};
   let store: any;
 
-  /** A call from the Code app's page, as its viewer: `admin` when strut says so. */
-  const page = (actor: string, admin: boolean) => {
+  /** A call from an app's page (the Code app's unless named), as its viewer: `admin` when strut says so. */
+  const page = (actor: string, admin: boolean, app = APP) => {
     const t = tools.buildAppTools({ apps: strut.apps, registry: strut.getRegistry(), services: strut.services, actor, admin, runStepDeps: { store, workspace: strut.workspace } });
     return async (type: string, config: Record<string, unknown> = {}): Promise<{ error?: string; result?: any }> =>
-      t[STEP_RUN].execute({ type, config, app: appIdentity(APP, version) }, { toolCallId: "t", messages: [] });
+      t[STEP_RUN].execute({ type, config, app: appIdentity(app, versions[app]!) }, { toolCallId: "t", messages: [] });
   };
   const admin = () => page("root", true);
   const member = () => page("ada", false);
@@ -157,14 +172,23 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     });
     // Installed by a person, as a box's admin does: they own its workflows,
     // so its schedule runs as them.
-    const res = await strut.app.request("/packages/install", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-strut-actor": "root" },
-      body: JSON.stringify({ ref: `file:${HERE}` }),
-    });
-    const body = await res.json();
-    assert.equal(res.status, 201, JSON.stringify(body));
-    version = (await strut.apps.manifestOf(APP)).version;
+    const install = async (dir: string) => {
+      const res = await strut.app.request("/packages/install", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-strut-actor": "root" },
+        body: JSON.stringify({ ref: `file:${dir}` }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 201, JSON.stringify(body));
+    };
+    await install(HERE);
+    const other = join(root, "acme-other");
+    for (const [rel, text] of Object.entries(OTHER)) {
+      await mkdir(dirname(join(other, rel)), { recursive: true });
+      await writeFile(join(other, rel), text);
+    }
+    await install(other);
+    for (const app of [APP, OTHER_APP]) versions[app] = (await strut.apps.manifestOf(app)).version;
   });
   after(async () => {
     await strut?.close?.().catch(() => {});
@@ -216,6 +240,26 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(r.ingested, r.head, "ingest ran once");
     assert.deepEqual(r.workspaces, ["strut-code"]);
     assert.deepEqual(await space("strut-code"), { name: "strut-code", main: CODE, repositories: [CODE] });
+  });
+
+  it("refuses an admin's change from any app but the Code app, and lists nothing changed", async () => {
+    const elsewhere = () => page("root", true, OTHER_APP);
+    const before = await list();
+    const seen = await elsewhere()("stadeum/code/repositories");
+    assert.equal(seen.error, undefined, seen.error);
+    assert.equal(seen.result.admin, false, "the other app draws no admin controls");
+    const refused = /the box's repositories are changed in the Code app \(stadeum\/code\/code\), not from acme\/other\/console/;
+    for (const [type, config] of [
+      ["stadeum/code/remove", { url: CODE }],
+      ["stadeum/code/place", { url: CODE, workspaces: ["elsewhere"] }],
+      ["stadeum/code/main", { workspace: "strut-code", url: CODE }],
+    ] as const) {
+      assert.match((await elsewhere()(type, config)).error ?? "", refused, type);
+    }
+    const run = await add(elsewhere(), PODS);
+    assert.equal(run.status, "error");
+    assert.match(run.error?.message ?? "", refused);
+    assert.deepEqual(await list(), before);
   });
 
   it("makes one node however the same repository is typed", async () => {

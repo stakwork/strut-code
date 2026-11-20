@@ -1,5 +1,5 @@
 import { z, defineStep } from "strut";
-import { asCtx, readList, view } from "./_code.js";
+import { asCtx, mayChange, readList, view } from "./_code.js";
 
 export default defineStep({
   type: "stadeum/code/repositories",
@@ -24,10 +24,10 @@ export default defineStep({
       }),
     ),
     workspaces: z.array(z.object({ name: z.string(), main: z.string().optional(), repositories: z.array(z.string()) })),
-    admin: z.boolean().optional().describe("On a page's call: whether its viewer may change the list (an admin)."),
+    admin: z.boolean().optional().describe("On a page's call: whether this call may change the list (an admin, in the Code app)."),
   }),
   async run(_cfg, ctx) {
     const c = asCtx(ctx);
-    return { ...view(await readList(c)), ...(c.app ? { admin: c.app.admin === true } : {}) };
+    return { ...view(await readList(c)), ...(c.app ? { admin: mayChange(c) } : {}) };
   },
 });

@@ -31,8 +31,10 @@ interface ShellResult {
 
 /** The part of strut's step context these steps read. */
 export interface Ctx {
-  /** Set by strut's app door on a page's call: `admin` when its viewer is an admin. */
-  app?: { name: string; admin?: boolean };
+  /** Set by strut's app door on a page's call, and carried by every run the
+   *  page launches: the app (its name from the identity strut signed for the
+   *  page) and `admin` when its viewer is an admin. */
+  app?: { name: string; version?: string; admin?: boolean };
   registry?: Record<string, StepDef | undefined>;
   services: {
     shell?: (req: { cmd: string; args?: string[]; cwd: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<ShellResult>;
@@ -166,10 +168,31 @@ export function view(list: List) {
 
 // ── who may change it ─────────────────────────────────────────────────────
 
-/** Changing the list is an admin's, from a page: strut's app door says so
- *  on the call (`ctx.app.admin`), and on every run the page launches. */
+/** The package's own app, where the list is changed. */
+export const CODE_APP = "stadeum/code/code";
+
+/**
+ * May this call change the list? Only an admin's call from this package's
+ * own Code app, or a run that page launched. Strut's app door names the app
+ * from the identity it signed for the page (`ctx.app.name`), and no other
+ * app may take a name under an installed package's prefix; it says whether
+ * the viewer is an admin (`ctx.app.admin`). Any other app an admin opens may
+ * list these steps among its grants, so an admin's call from it changes
+ * nothing, as strut gives a package's admin scope to its own app alone
+ * (stakwork/strut#789). A builder's preview of the app is not the app.
+ */
+export function mayChange(ctx: Ctx): boolean {
+  const app = ctx.app;
+  return app?.admin === true && app.name === CODE_APP && !app.version?.startsWith("preview-");
+}
+
 export function requireAdmin(ctx: Ctx): void {
-  if (ctx.app?.admin === true) return;
+  if (mayChange(ctx)) return;
+  const app = ctx.app;
+  if (app?.admin === true) {
+    const from = app.name === CODE_APP ? "a preview of it" : app.name;
+    throw new Error(`the box's repositories are changed in the Code app (${CODE_APP}), not from ${from}`);
+  }
   throw new Error("only an admin changes the box's repositories, in the Code app");
 }
 

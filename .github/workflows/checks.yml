@@ -5,8 +5,8 @@ name: checks
 # driven as the Code app, the schedule and the job agent drive it
 # (package.test.ts). Strut is installed as its own CI installs it
 # (stakwork/strut .github/workflows/tests.yml): yarn.lock, no scripts, and
-# the kit's own install. The test reaches github.com: the repositories it
-# adds are public.
+# the kit's own install. The test reaches github.com for the public
+# repositories it adds; a private one is served on the runner itself.
 
 on:
   pull_request:

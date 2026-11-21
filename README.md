@@ -6,8 +6,11 @@ the Code app where they are set up, and the `Code Change` page, which a job
 that changes one of them follows. It names no forge: any https git remote
 works the same, and a GitLab or Forgejo package would use it whole.
 
-This version reads public repositories only. A private one is refused, with
-the reason, until strut finds a person's git credentials by a remote's host.
+A private repository is read as a person, with their own token for its
+host: the admin who adds it, and for the scheduled `check` the `check`
+workflow's owner. Strut picks the token by the address's host and hands it
+to git for that host alone; the package never sees it, and names no forge,
+host or secret.
 
 ## What it ships
 
@@ -22,7 +25,7 @@ the reason, until strut finds a person's git credentials by a remote's host.
 | `workflows/ingest.yaml` | Takes a repository in at its head. Today it only records the commit: a parser plugs in here, before `record` |
 | `steps/repositories.ts` | The job agent's tool (`job: tools:`) and the app's read: every repository and workspace the box holds |
 | `steps/add.ts`, `remove.ts`, `place.ts`, `main.ts` | The admin's changes, each refused to anyone else |
-| `steps/heads.ts` | `check`'s pass: `git ls-remote --symref <url> HEAD` on each remote, four at a time |
+| `steps/heads.ts` | `check`'s pass: strut's `git/remote-head` on each remote, four at a time, as the run's person |
 | `steps/record.ts` | `ingest`'s step: the head, recorded as ingested |
 | `steps/_code.ts` | What the steps share |
 
@@ -44,20 +47,37 @@ How it holds together:
   `graph/create-triplet`, `graph/delete-edge` and `graph/graph-edges`, run
   from the step's own context (`ctx.registry`), so strut's rules for the
   graph hold as for any other caller.
-- **An address is checked before it is stored, and reaches git as one
-  argument.** Only `https://<host>/<owner…>/<name>`, with no credentials,
-  query or `#`, each part letters, digits, `.`, `_` and `-`. It is written
-  one way (lowercase host, no trailing slash or `.git`), so the same
-  repository added twice is one node. Git runs through strut's shell, which
-  starts no shell: no credential helper, no prompt, none of the server's git
-  configuration.
+- **An address is checked before it is stored.** Only
+  `https://<host>/<owner…>/<name>`, with no credentials, query or `#`, each
+  part letters, digits, `.`, `_` and `-`. It is written one way (lowercase
+  host, no trailing slash or `.git`), so the same repository added twice is
+  one node.
+- **A remote is asked through strut, as a person.** `add` and `check` ask
+  for a repository's default branch and head with strut's `git/remote-head`
+  (one `git ls-remote --symref <url> HEAD`, no clone), run from the step's
+  own context as the graph steps are. Strut reads it with the run's token
+  for the address's host (`github.com`'s `GITHUB_TOKEN`, or the secret a
+  forge's package serves that host with, `provides.git`): the person's own,
+  as each person connects their account. An admin's Add runs as that
+  admin; the scheduled `check` runs as its workflow's owner. The token goes
+  to git for that host alone, never to the package; a public repository
+  needs none. The package runs no git of its own.
+- **A refusal says what a person can do.** From strut's error: no access
+  (the person has not connected an account for that host, or it cannot read
+  the repository), no repository there, unreachable, or no commits yet.
+  `check` keeps it on the repository's node (`problem`), naming the
+  workflow's owner it ran as, so whoever opens the Code app sees whose
+  account is missing; Add says it to the admin.
 - **A repository is always in a workspace.** A new one gets its own, named
   after it (then after its owner and name, then numbered, when the name is
   taken). Removing a repository takes it out of every workspace; a
   workspace left empty goes, and one whose main left takes its next
   repository as main.
 
-It requires no secret, and `git` on the server.
+It requires no secret of its own, and a strut with the `git/remote-head`
+step (stakwork/strut#798, 2026-11-20). Strut has no way yet for a package
+to say which strut it needs: on an older one, `add` and `check` fail with a
+sentence that names the missing step.
 
 ## A Code Change job
 
@@ -137,7 +157,13 @@ drives it as the Code app (an admin and a member), the schedule and the job
 agent do. It launches a job of the kind `Code Change` and checks that the
 turn opens with the page; the model is stood in for (strut's
 `registerModelWrapper`), so no key is needed. Uninstalling drops the page.
-It reaches github.com, adding public repositories.
+It reaches github.com, adding public repositories. A private one is served
+from the test's own machine over http behind a token, its https address
+pointed there by git's `insteadOf` (strut's `test-util/git-remote.ts`), and
+a stand-in forge package serves that host's token: added with the admin's
+own token and refused without it, then checked as the `check` workflow's
+owner, with a `problem` naming them when they have none. No real token is
+read.
 
 ```bash
 STRUT_DIR=../strut npm test

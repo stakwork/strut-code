@@ -1,9 +1,6 @@
 package: stadeum/code
-version: 0.2.0
+version: 0.3.0
 description: The box's repositories and the workspaces they are grouped in, the Code app where they are set up, a check for new commits every 15 minutes, the repositories tool for the job agent, and the Code Change page a job that changes one of them follows. It names no forge.
-requires:
-  # `check` and `add` ask a repository's remote for its head with `git ls-remote`.
-  binaries: [git]
 job:
   tools: [repositories]
 schedules:

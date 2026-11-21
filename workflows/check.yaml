@@ -1,8 +1,8 @@
 description: >-
   Every 15 minutes (the package's schedule): ask each of the box's repositories'
-  remotes for its default branch's head, the way `git ls-remote <url> HEAD` does,
-  record a head that moved, then run `ingest` on each repository whose head is
-  not yet ingested.
+  remotes for its default branch's head through strut's `git/remote-head`, as
+  this workflow's owner, record a head that moved, then run `ingest` on each
+  repository whose head is not yet ingested.
 steps:
   - id: heads
     type: heads

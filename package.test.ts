@@ -8,21 +8,31 @@
  * is launched too, to see its turn open with the package's page: the model
  * is stood in for by an `agent` step that records what the turn gave it.
  *
- * It reaches github.com: the repositories it adds are public ones (this
- * package's own repository and stadeum/pods'), and a missing one stands in
- * for a private one, which GitHub answers the same way.
+ * It reaches github.com: the public repositories it adds are this package's
+ * own and stadeum/pods', and a missing one is refused as a private one is,
+ * which GitHub answers the same way with no token. A PRIVATE repository is
+ * served from this machine over http behind a token (strut's
+ * `test-util/git-remote.ts`), and its https address is pointed there by
+ * git's `insteadOf` in the shell strut is given: the token lookup and git's
+ * credential helper both see the same host, `127.0.0.1:<port>`. Another
+ * package stands in for a forge's, serving that host with `LAB_TOKEN`
+ * (`provides.git`), and each person's token is their own secret. No one's real token is read: GITHUB_TOKEN is unset here.
  *
  *   STRUT_DIR=../strut npm test
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { address, remoteProblem, workspaceName, workspaceNames } from "./steps/_code.ts";
+import { address, askRemote, remoteProblem, workspaceName, workspaceNames } from "./steps/_code.ts";
 
 const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
+// Nobody's token: not this machine's, not its git's. github.com is read with none.
+for (const k of ["GITHUB_TOKEN", "GH_TOKEN", "LAB_TOKEN", "STRUT_GIT_LOCAL"]) delete process.env[k];
 const from = async <T>(path: string): Promise<T> => (await import(pathToFileURL(join(STRUT, "src", path)).href)) as T;
 
 const HERE = resolve(".");
@@ -34,7 +44,8 @@ const HEX = /^[0-9a-f]{40}$/;
 const PAGE = "Code Change";
 
 /** Another package, whose app an admin may open, granting this package's
- *  steps and its `add` workflow: it must change nothing. */
+ *  steps and its `add` workflow: it must change nothing. It also stands in
+ *  for a forge's package, serving the private repositories' host. */
 const OTHER_APP = "acme/other/console";
 const OTHER: Record<string, string> = {
   "strut.yaml": "package: acme/other\nversion: 0.1.0\n",
@@ -47,6 +58,28 @@ const OTHER: Record<string, string> = {
   ].join("\n"),
   "apps/console/src/App.tsx": "export default function App() { return <p>console</p>; }\n",
 };
+
+/** The private repositories' token, and one their host refuses. */
+const TOKEN = `lab-${randomBytes(12).toString("hex")}`;
+const WRONG = `wrong-${randomBytes(12).toString("hex")}`;
+
+/** git on this machine with none of its own config: for the test's remotes. */
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_AUTHOR_NAME: "test",
+      GIT_AUTHOR_EMAIL: "test@example.test",
+      GIT_COMMITTER_NAME: "test",
+      GIT_COMMITTER_EMAIL: "test@example.test",
+    },
+  }).trim();
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("an address", () => {
   it("is written one way, so the same repository typed twice is one address", () => {
@@ -89,11 +122,27 @@ describe("an address", () => {
     assert.throws(() => workspaceName("-x"), /not a workspace's name/);
   });
 
-  it("says plainly why a remote refused", () => {
-    assert.match(remoteProblem(CODE, "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n"), /private, or there is no repository there.*public repositories only/);
-    assert.match(remoteProblem(CODE, "remote: HTTP Basic: Access denied\nfatal: Authentication failed"), /asks for a sign-in/);
-    assert.match(remoteProblem(CODE, "fatal: repository 'x' not found"), /there is no repository at/);
-    assert.match(remoteProblem(CODE, "fatal: unable to access 'x': Could not resolve host: nowhere.invalid"), /can't be reached/);
+  it("says from strut's error what a person can act on, and whose access is missing", () => {
+    const url = "https://git.example.test/team/app";
+    const denied = `remote_denied: ${url} asks for a credential — it is private, or there is no repository there — and this run has no token for its host`;
+    assert.equal(
+      remoteProblem(url, denied, { you: true }),
+      `${url} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for git.example.test, or that account cannot read it. Connect one that can, then add it again.`,
+    );
+    assert.equal(
+      remoteProblem(url, `remote_denied: ${url} refused the run's token for git.example.test: it cannot read this repository, or there is none there`, { who: "Ada (ada)", scheduled: true }),
+      `${url} asks for a sign-in: it is private, or there is no repository there, and Ada (ada), whom the check runs as (its workflow's owner), has no access to it: Ada (ada) has not connected an account for git.example.test, or that account cannot read it. Either Ada (ada) connects one that can, or an admin gives the check workflow an owner whose account can.`,
+    );
+    assert.match(remoteProblem(url, denied, { who: "ada" }), /and ada has no access to it: ada has not connected an account for git\.example\.test, or that account cannot read it\.$/);
+    assert.equal(remoteProblem(url, `remote_not_found: no repository at ${url}`, { you: true }), `there is no repository at ${url} that you can see`);
+    assert.equal(remoteProblem(url, `remote_not_found: no repository at ${url}`, { who: "ada", scheduled: true }), `there is no repository at ${url} that ada, whom the check runs as (its workflow's owner), can see`);
+    assert.equal(remoteProblem(url, `remote_unreachable: ${url} did not answer in 30 s`), `${url} can't be reached: did not answer in 30 s`);
+    assert.equal(remoteProblem(url, `remote_unreachable: ${url}: fatal: unable to access: Could not resolve host`), `${url} can't be reached: fatal: unable to access: Could not resolve host`);
+    assert.equal(remoteProblem(url, `remote_empty: ${url} has no commits yet: its remote names no head`), `${url} has no commits yet: its remote names no head`);
+  });
+
+  it("says plainly what an older strut lacks: the step it asks a remote with", async () => {
+    await assert.rejects(askRemote({ registry: {} }, CODE), /strut's git\/remote-head step, and this strut server has none: it needs a newer strut \(the step came with stakwork\/strut#798/);
   });
 });
 
@@ -143,9 +192,57 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   const repo = async (url: string) => (await list()).repositories.find((r) => r.url === url);
   const space = async (name: string) => (await list()).workspaces.find((w) => w.name === name);
 
+  /** The private repositories: bare ones served behind TOKEN, their https
+   *  addresses, and a working copy that pushes a new commit to them. */
+  let priv: { url: string; host: string; seen: Array<{ path: string; password?: string }>; close(): Promise<void> };
+  let SECRET = "";
+  let OTHER_SECRET = "";
+  let work = "";
+  const pushCommit = (message: string) => {
+    git(work, "commit", "--quiet", "--allow-empty", "-m", message);
+    for (const name of ["secret", "other"]) git(work, "push", "--quiet", join(root, "remotes", "team", name), "trunk");
+    return git(work, "rev-parse", "HEAD");
+  };
+  /** A person's own secret, as the connect seam writes it. */
+  const ownSecret = async (actor: string, name: string, value: string) => {
+    const res = await strut.app.request(`/actors/${actor}/secrets/${name}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) });
+    assert.equal(res.status < 300, true, await res.text());
+  };
+  /** The check workflow's owner: whom its schedule runs as. */
+  const giveCheckTo = async (owner: string) => {
+    const res = await strut.app.request(`/workflows/${encodeURIComponent("stadeum/code/check")}/owner`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) });
+    assert.equal(res.status, 200, await res.text());
+  };
+  /** "Run now" on check's schedule: the scheduler's own fire, as the
+   *  workflow's owner. Then its run's summary, once it is over. */
+  const fireCheck = async () => {
+    const { automations } = await (await strut.app.request("/automations")).json();
+    const schedule = automations.find((a: any) => a.package === "stadeum/code");
+    const res = await strut.app.request(`/workflows/${encodeURIComponent("stadeum/code/check")}/automations/${encodeURIComponent(schedule.id)}/fire`, { method: "POST" });
+    const body = await res.json();
+    assert.equal(res.status, 202, JSON.stringify(body));
+    const runId = body.runId ?? body.result?.runId;
+    for (let i = 0; i < 1200; i++) {
+      const summary = await store.getRunSummary("stadeum/code/check", runId);
+      if (summary && summary.status !== "waiting") return summary;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`check's run ${runId} did not end`);
+  };
+
   before(async () => {
     delete process.env["STRUT_API_KEY"];
     root = await mkdtemp(join(tmpdir(), "strut-code-test-"));
+    // Two private repositories on this machine, on `trunk`, behind TOKEN.
+    const { serveGit, insteadOf } = await from<any>("test-util/git-remote.ts");
+    await mkdir(join(root, "remotes", "team"), { recursive: true });
+    for (const name of ["secret", "other"]) git(join(root, "remotes"), "init", "--quiet", "--bare", "--initial-branch=trunk", join("team", name));
+    work = join(root, "work");
+    git(root, "init", "--quiet", "--initial-branch=trunk", work);
+    pushCommit("first");
+    priv = await serveGit(join(root, "remotes"), { token: TOKEN });
+    SECRET = `https://${priv.host}/team/secret`;
+    OTHER_SECRET = `https://${priv.host}/team/other`;
     store = new (await from<any>("store.ts")).MemoryRunStore();
     const { createStrut } = await from<any>("createStrut.ts");
     const { openGraphBackend } = await from<any>("graph/backend.ts");
@@ -197,21 +294,40 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
       earnings: false,
       staff: false,
       worker: false,
+      // A server: git gets no credential of this machine's, only the run's.
+      git: { local: false },
+      // The private repositories' https addresses, read from this machine
+      // over http: the token's host and git's are one, 127.0.0.1:<port>.
+      services: { shell: insteadOf({ [`https://${priv.host}/`]: `${priv.url}/` }) },
     });
-    // Installed by a person, as a box's admin does: they own its workflows,
-    // so its schedule runs as them.
+    // Installed by a person, as a box's admin does with the deployment key
+    // and their actor: they own its workflows, so its schedule runs as them.
+    // Strut trusts `x-strut-actor` only beside its key, which is set for
+    // the install alone.
     const install = async (dir: string) => {
-      const res = await strut.app.request("/packages/install", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-strut-actor": "root" },
-        body: JSON.stringify({ ref: `file:${dir}` }),
-      });
-      const body = await res.json();
-      assert.equal(res.status, 201, JSON.stringify(body));
+      const key = `key-${randomBytes(8).toString("hex")}`;
+      process.env["STRUT_API_KEY"] = key;
+      try {
+        const res = await strut.app.request("/packages/install", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-strut-actor": "root" },
+          body: JSON.stringify({ ref: `file:${dir}` }),
+        });
+        const body = await res.json();
+        assert.equal(res.status, 201, JSON.stringify(body));
+      } finally {
+        delete process.env["STRUT_API_KEY"];
+      }
     };
     await install(HERE);
     const other = join(root, "acme-other");
-    for (const [rel, text] of Object.entries(OTHER)) {
+    // It serves the private repositories' host too, as a forge's package
+    // (a GitLab one) would: the secret its token is (`provides.git`).
+    const files = {
+      ...OTHER,
+      "strut.yaml": [OTHER["strut.yaml"]!.trim(), "requires:", "  optional: [LAB_TOKEN]", "provides:", "  git:", `    - { host: "${priv.host}", secret: LAB_TOKEN }`, ""].join("\n"),
+    };
+    for (const [rel, text] of Object.entries(files)) {
       await mkdir(dirname(join(other, rel)), { recursive: true });
       await writeFile(join(other, rel), text);
     }
@@ -220,6 +336,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   });
   after(async () => {
     await strut?.close?.().catch(() => {});
+    await priv?.close().catch(() => {});
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
 
@@ -227,7 +344,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.2.0");
+    assert.equal(pkg.version, "0.3.0");
+    assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     assert.ok(job.params.tools.includes("stadeum/code/repositories"), "the job agent is granted the tool");
     const { automations } = await (await strut.app.request("/automations")).json();
@@ -237,6 +355,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(check.trigger.every, "interval");
     assert.equal(check.trigger.minutes, 15);
     assert.equal(check.enabled ?? true, true, "on");
+    assert.equal(check.runsAs, "root", `it runs as the person who installed it: ${JSON.stringify(check)}`);
   });
 
   it("ships the Code Change page under Job, as a kind of job, its text the file's", async () => {
@@ -406,6 +525,93 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const back = await repo(CODE);
     assert.deepEqual(back.workspaces, ["strut-code"]);
     assert.equal(back.ingested, back.head);
+  });
+
+  it("reads a private repository with the caller's own token for its host, and refuses it without one", async () => {
+    const first = git(work, "rev-parse", "HEAD");
+    // No token of the admin's own: refused, said so, and nothing listed.
+    const refused = await add(admin(), SECRET);
+    assert.equal(refused.status, "error");
+    assert.match(
+      refused.error?.message ?? "",
+      new RegExp(`${esc(SECRET)} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for ${esc(priv.host)}, or that account cannot read it\\. Connect one that can, then add it again\\.`),
+    );
+    assert.equal(await repo(SECRET), undefined);
+    assert.ok(priv.seen.length > 0 && priv.seen.every((s) => s.password === undefined), "asked with no token");
+
+    // The admin connects their account for that host: read with their token.
+    await ownSecret("root", "LAB_TOKEN", TOKEN);
+    const run = await add(admin(), SECRET);
+    assert.equal(run.status, "success", JSON.stringify(run.error));
+    const r = await repo(SECRET);
+    assert.equal(r.name, "secret");
+    assert.equal(r.branch, "trunk", "the remote's own default branch");
+    assert.equal(r.head, first);
+    assert.equal(r.ingested, first, "ingested once");
+    assert.deepEqual(r.workspaces, ["secret"]);
+    assert.ok(priv.seen.some((s) => s.password === TOKEN), "the token reached its own host");
+
+    // It is the caller's own: another admin with none of their own, or one
+    // the host refuses, can't add a private repository though root can.
+    const bob = await add(page("bob", true), OTHER_SECRET);
+    assert.equal(bob.status, "error");
+    assert.match(bob.error?.message ?? "", /and you have no access to it: you have not connected an account for/);
+    await ownSecret("bob", "LAB_TOKEN", WRONG);
+    const wrong = await add(page("bob", true), OTHER_SECRET);
+    assert.equal(wrong.status, "error");
+    assert.match(wrong.error?.message ?? "", /and you have no access to it/);
+    assert.ok(!(wrong.error?.message ?? "").includes(WRONG));
+    assert.equal(await repo(OTHER_SECRET), undefined);
+    // A public repository is read as before, whatever the caller holds.
+    assert.equal((await repo(CODE))?.problem, undefined);
+  });
+
+  it("checks a private repository as the check workflow's owner, and names them in its problem when they have no access", async () => {
+    // root installed the package, so the schedule runs as root, who has a token.
+    const second = pushCommit("second");
+    const ran = await fireCheck();
+    assert.equal(ran.status, "success", JSON.stringify(ran.error));
+    assert.equal(ran.principal, "root", "as the workflow's owner");
+    let r = await repo(SECRET);
+    assert.equal(r.head, second, "its new head, read with the owner's token");
+    assert.equal(r.ingested, second, "and ingested");
+    assert.equal(r.problem, undefined);
+
+    // ada owns check now, and has connected no account for that host. An
+    // admin opening the app reads ada's name in the problem, not their own.
+    await giveCheckTo("ada");
+    const third = pushCommit("third");
+    const denied = await fireCheck();
+    assert.equal(denied.status, "success", JSON.stringify(denied.error));
+    assert.equal(denied.principal, "ada");
+    r = await repo(SECRET);
+    assert.equal(r.head, second, "not read");
+    assert.equal(
+      r.problem,
+      `${SECRET} asks for a sign-in: it is private, or there is no repository there, and ada, whom the check runs as (its workflow's owner), has no access to it: ` +
+        `ada has not connected an account for ${priv.host}, or that account cannot read it. Either ada connects one that can, or an admin gives the check workflow an owner whose account can.`,
+    );
+    assert.equal((await repo(CODE)).problem, undefined, "a public repository is read as before");
+
+    // ada connects one: the next check reads it, and the problem goes.
+    await ownSecret("ada", "LAB_TOKEN", TOKEN);
+    const again = await fireCheck();
+    assert.equal(again.status, "success", JSON.stringify(again.error));
+    r = await repo(SECRET);
+    assert.equal(r.head, third);
+    assert.equal(r.ingested, third);
+    assert.equal(r.problem, undefined);
+    await giveCheckTo("root");
+  });
+
+  it("never puts a token in a node, a run's output or an error", async () => {
+    const said: string[] = [JSON.stringify(await list()), JSON.stringify(await once("repository-nodes", "graph/find", { node_type: "Repository" }))];
+    for (const events of store.events.values()) said.push(JSON.stringify(events));
+    for (const summary of store.summaries.values()) said.push(JSON.stringify(summary));
+    const all = said.join("\n");
+    assert.ok(all.includes(SECRET), "the runs and nodes read are the ones that used it");
+    assert.ok(all.includes("has no access to it"), "and the refusals among them");
+    for (const token of [TOKEN, WRONG]) assert.equal(all.includes(token), false, "a token is never said");
   });
 
   it("goes with the package: the Code Change page, its place under Job and the job's tool", async () => {

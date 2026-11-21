@@ -7,8 +7,6 @@
  * Repositories page, `concepts/Repositories.md`. Another package reads these
  * nodes without requiring this one.
  */
-import { tmpdir } from "node:os";
-
 export const REPOSITORY = "Repository";
 export const WORKSPACE = "Workspace";
 /** `Workspace -[INCLUDES]-> Repository`: one edge for each repository in it. */
@@ -22,13 +20,6 @@ interface StepDef {
   run(cfg: unknown, ctx: unknown): Promise<unknown>;
 }
 
-interface ShellResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-}
-
 /** The part of strut's step context these steps read. */
 export interface Ctx {
   /** Set by strut's app door on a page's call, and carried by every run the
@@ -36,10 +27,12 @@ export interface Ctx {
    *  page) and `admin` when its viewer is an admin. */
   app?: { name: string; version?: string; admin?: boolean };
   registry?: Record<string, StepDef | undefined>;
-  services: {
-    shell?: (req: { cmd: string; args?: string[]; cwd: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<ShellResult>;
-    dataDir?: string;
-  };
+  /** Whom the run is as: the person who launched it (an admin's Add), else
+   *  its workflow's owner (`check`'s schedule). Their secrets are the run's. */
+  actor?: string;
+  principal?: string;
+  /** Set when the run is a fire of an automation: `check`'s schedule. */
+  automation?: { id: string };
 }
 
 export const asCtx = (ctx: unknown): Ctx => ctx as Ctx;
@@ -269,47 +262,89 @@ export interface Remote {
   head: string;
 }
 
+/** strut's step that asks a remote, and what it fails with: a prefix each. */
+const REMOTE_HEAD = "git/remote-head";
+const REMOTE_FAILURE = /^remote_(denied|not_found|unreachable|empty):\s*/;
+
 /**
  * Ask a repository's remote for its default branch and the commit at its
- * head, as `git ls-remote --symref <url> HEAD` does: one request, no clone.
- * Through strut's shell, which runs git with no shell between and a scrubbed
- * environment, so the address is one argument as it is. No credential is
- * used: no helper, no prompt, no git configuration of the server's.
+ * head, through strut's `git/remote-head` (`git ls-remote --symref <url>
+ * HEAD`: one request, no clone), run from this step's own context. Strut
+ * reads it as the person the run is: their own token for the address's
+ * host, which strut hands git for that host alone and never to this
+ * package; a host no secret serves, or a person with no token for it, is
+ * asked with none, so a public repository works for anyone.
  */
-export async function askRemote(ctx: Ctx, url: string): Promise<Remote> {
-  const shell = ctx.services.shell;
-  if (!shell) throw new Error("stadeum/code runs git through strut's shell, and this run has none");
-  const r = await shell({
-    cmd: "git",
-    args: ["-c", "credential.helper=", "ls-remote", "--symref", url, "HEAD"],
-    cwd: ctx.services.dataDir ?? tmpdir(),
-    env: { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
-    timeoutMs: 30_000,
-  });
-  if (r.timedOut) throw new Error(`${url}: its remote did not answer in 30 seconds`);
-  if (r.code !== 0) throw new Error(remoteProblem(url, r.stderr));
-  let branch: string | undefined;
-  let head: string | undefined;
-  for (const line of r.stdout.split("\n")) {
-    const sym = /^ref: refs\/heads\/(\S+)\tHEAD$/.exec(line);
-    if (sym) branch = sym[1];
-    const sha = /^([0-9a-f]{40}|[0-9a-f]{64})\tHEAD$/.exec(line);
-    if (sha) head = sha[1];
+export async function askRemote(ctx: Ctx, url: string, as: () => Promise<Asker> = () => asker(ctx)): Promise<Remote> {
+  const def = ctx.registry?.[REMOTE_HEAD];
+  if (!def) {
+    throw new Error(
+      `stadeum/code asks a repository's remote through strut's ${REMOTE_HEAD} step, and this strut server has none: it needs a newer strut (the step came with stakwork/strut#798, 2026-11-20)`,
+    );
   }
-  if (!head) throw new Error(`${url} has no commits yet: its remote names no head`);
-  if (!branch) throw new Error(`${url}: its remote does not say which branch is its default`);
-  return { branch, head };
+  try {
+    return (await def.run(def.input.parse({ repo: url, timeoutMs: 30_000 }), ctx)) as Remote;
+  } catch (e) {
+    throw new Error(remoteProblem(url, e instanceof Error ? e.message : String(e), await as()));
+  }
 }
 
-/** What git's failure means, in a sentence a person reads. */
-export function remoteProblem(url: string, stderr: string): string {
-  const first = stderr.split("\n").map((l) => l.trim()).find(Boolean) ?? "no reason given";
-  if (/terminal prompts disabled|could not read (username|password)|authentication failed|access denied|returned error: 40[13]|\b40[13]\b/i.test(stderr)) {
-    return `${url} asks for a sign-in: it is private, or there is no repository there. This version reads public repositories only: a private one needs git credentials for its host, which strut doesn't have yet.`;
+/** Whom a remote is asked as, said to whoever reads why it failed: `you`
+ *  on an admin's own Add, else the person by name (`check`'s schedule runs
+ *  as its workflow's owner, never as whoever looks at the app). */
+export interface Asker {
+  you?: true;
+  /** The person, as `people/names` names them, with their actor. */
+  who?: string;
+  /** The run is `check`'s schedule: it runs as the workflow's owner. */
+  scheduled?: true;
+}
+
+/** Whom this run asks as: `you` on an admin's call from the Code app,
+ *  otherwise the run's person, named. */
+export async function asker(ctx: Ctx): Promise<Asker> {
+  if (mayChange(ctx)) return { you: true };
+  const actor = ctx.principal ?? ctx.actor;
+  const scheduled = ctx.automation ? { scheduled: true as const } : {};
+  if (!actor) return scheduled;
+  let name: string | undefined;
+  try {
+    const def = ctx.registry?.["people/names"];
+    const out = def ? ((await def.run(def.input.parse({ actors: [actor] }), ctx)) as { people?: Record<string, { name?: string }> }) : undefined;
+    name = out?.people?.[actor]?.name;
+  } catch {
+    // A name is for showing: the actor says who it is without one.
   }
-  if (/not found|returned error: 404|\b404\b/i.test(stderr)) return `there is no repository at ${url}`;
-  if (/could not resolve host|failed to connect|connection refused|timed out/i.test(stderr)) return `${url} can't be reached: ${first.replace(/^fatal:\s*/, "")}`;
-  return `${url}: git ls-remote failed: ${first.replace(/^fatal:\s*/, "")}`;
+  return { who: name && name !== actor ? `${name} (${actor})` : actor, ...scheduled };
+}
+
+/** What `git/remote-head`'s failure means, in a sentence a person can act
+ *  on: by its prefix, and, when it is access, whose is missing. */
+export function remoteProblem(url: string, message: string, as: Asker = {}): string {
+  const kind = REMOTE_FAILURE.exec(message)?.[1];
+  let said = message.replace(REMOTE_FAILURE, "").replace(/\s+/g, " ").trim();
+  if (said.startsWith(url)) said = said.slice(url.length).replace(/^:/, "").trim();
+  const host = URL.canParse(url) ? new URL(url).host : "its host";
+  // Whose access it is, and how to say it.
+  const owner = as.scheduled ? `${as.who ?? "nobody"}, whom the check runs as (its workflow's owner),` : (as.who ?? "nobody");
+  switch (kind) {
+    case "denied": {
+      const lead = `${url} asks for a sign-in: it is private, or there is no repository there`;
+      if (as.you) return `${lead}, and you have no access to it: you have not connected an account for ${host}, or that account cannot read it. Connect one that can, then add it again.`;
+      const who = as.who ?? "nobody";
+      const fix = as.scheduled ? ` Either ${who} connects one that can, or an admin gives the check workflow an owner whose account can.` : "";
+      return `${lead}, and ${owner} has no access to it: ${who} has not connected an account for ${host}, or that account cannot read it.${fix}`;
+    }
+    case "not_found":
+      // A forge may answer a private repository a person can't read as none at all.
+      return `there is no repository at ${url} that ${as.you ? "you" : owner} can see`;
+    case "unreachable":
+      return `${url} can't be reached${said ? `: ${said}` : ""}`;
+    case "empty":
+      return `${url} ${said || "has no commits yet"}`;
+    default:
+      return `${url}: ${said || "its remote could not be asked"}`;
+  }
 }
 
 // ── changing the list ─────────────────────────────────────────────────────
@@ -438,9 +473,12 @@ export async function checkHeads(ctx: Ctx) {
   const moved: string[] = [];
   const ingest: string[] = [];
   const problems: Array<{ url: string; problem: string }> = [];
+  // Whom it asks as, named once and only when a remote refuses.
+  let named: Promise<Asker> | undefined;
+  const as = () => (named ??= asker(ctx));
   const one = async (repo: Repo) => {
     try {
-      const remote = await askRemote(ctx, repo.url);
+      const remote = await askRemote(ctx, repo.url, as);
       const data: Record<string, string> = { checked: at };
       if (remote.head !== repo.head) {
         data["head"] = remote.head;

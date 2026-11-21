@@ -10,9 +10,13 @@ change them in its app, **Code**. A job agent reads them with the
 Every 15 minutes the package's `check` workflow asks each repository's
 remote for the head of its default branch (as `git ls-remote <url> HEAD`
 does) and records a head that moved. Then `ingest` takes each new head
-in. Today `ingest` only records the commit. A repository is reached by
-its https address with no credential, so only public repositories can be
-added for now.
+in. Today `ingest` only records the commit.
+
+A repository is reached by its https address, public or private. A
+private one is read as a person, with their own token for its host: the
+admin who adds it, then the `check` workflow's owner, whom its schedule
+runs as. When that person has connected no account for the host, or theirs
+cannot read the repository, its `problem` says so and names them.
 
 ## The contract
 

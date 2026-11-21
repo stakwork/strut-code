@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useStrutClient } from "@strut/kit";
+import { useStrutClient, useToolInput } from "@strut/kit";
 import { FolderGit2, GitBranch, MoreHorizontal, Plus, Star } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { addressToAdd } from "./input";
 
 // The package's steps and its one workflow, by their full names.
 const LIST = "stadeum/code/repositories";
@@ -67,6 +68,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).rep
 export default function App() {
   const client = useStrutClient();
   const qc = useQueryClient();
+  const input = useToolInput();
   const list = useQuery({ queryKey: ["code", "list"], queryFn: () => client.run<List>(LIST), refetchInterval: 30_000 });
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -119,7 +121,7 @@ export default function App() {
         <span className="text-sm text-muted-foreground">the box's repositories, by workspace</span>
       </header>
 
-      {admin && <AddForm busy={busy} onAdd={add} />}
+      {admin && <AddForm busy={busy} onAdd={add} given={addressToAdd(input, admin)} />}
       {error && (
         <Alert variant="destructive">
           <AlertDescription className="break-words">{error}</AlertDescription>
@@ -235,8 +237,13 @@ export default function App() {
   );
 }
 
-function AddForm({ busy, onAdd }: { busy: boolean; onAdd: (url: string) => Promise<boolean> }) {
-  const [url, setUrl] = useState("");
+/** `given`: an address the app was opened with (./input.ts). It fills the
+ *  field, and adds nothing until the admin presses Add. */
+function AddForm({ busy, onAdd, given }: { busy: boolean; onAdd: (url: string) => Promise<boolean>; given?: string }) {
+  const [url, setUrl] = useState(given ?? "");
+  useEffect(() => {
+    if (given) setUrl(given);
+  }, [given]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (url.trim() && (await onAdd(url.trim()))) setUrl("");

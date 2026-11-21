@@ -30,14 +30,19 @@ alone?
 
 ## 3. A small change, in a checkout
 
-1. `git/checkout { repo: <url>, workdir: <your job id> }`.
+1. `git_checkout { repo: <url>, workdir: <your job id> }`.
 2. Find the place and make the edit. Install, build and test nothing.
 3. If it turns out deeper than it looked (the value is computed, tests or
    other code depend on it, the edit spreads), stop: do it on a pod (4),
    and say in `text` why you moved it.
-4. Stage it with `bash` (`git add -A` in the checkout). Then `git/push {
-   path, branch, message }` to a new branch, and `github/create-pr { repo:
-   <url>, head: <that branch>, base: <the default branch>, title, body }`.
+4. Stage it with `bash` (`git add -A` in the checkout), then `git_push {
+   path: <the absolute path git_checkout returned>, branch: <a new
+   branch>, message }`.
+5. Open the pull request with your pull-request tool for the repository's
+   host (`github_create_pr { repo: <url>, head: <your branch>, base: <the
+   default branch>, title, body }` for github.com). With none, say the
+   branch is pushed (its name, on `url`) and that this box has no tool to
+   open the pull request.
 
 Its claim is checked by the person looking at the pull request (an
 external check): nothing runs it here.
@@ -62,18 +67,15 @@ nothing was run, no app and no tests, and why.
 
 ## 5. How it ends
 
-- Always a new branch and a pull request. Never push to the default
-  branch, and never force.
+- Always a new branch, never the default one, and never force.
 - A later turn's change ("make it bigger") goes on the same branch, so it
   lands in the same pull request. If the checkout is gone, check that
   branch out (`ref`).
 - List the pull request in `artifacts`: `{ id: "pr", kind:
   "pull_request", title, url }`.
-- When the pull request can't be opened, say why in plain words, and hand
-  over the change's diff as a file so nothing is lost. The change waits in
-  this job for the next turn.
+- When the branch can't be pushed, say why in plain words, and hand over
+  the change's diff as a file so nothing is lost.
 - A push or pull request refused for want of the person's credentials
   (`no_push_permission:`, or a token that isn't set) means their account
-  for that host isn't connected to this box, or can't push to that
-  repository. Ask them to connect their account for that host, or to get
-  access, then to ask again.
+  for that host isn't connected to this box, or can't push there: ask
+  them to connect it, or to get access, then to ask again.

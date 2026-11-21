@@ -219,10 +219,23 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(run.status, "success", JSON.stringify(run.error));
     return run.output.s ?? run.output;
   };
-  /** The page's text as its file holds it, front matter left out. */
-  const pageText = async () => (await readFile(join(HERE, "concepts", `${PAGE}.md`), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "").trim();
+  /** A page's text as its file holds it, front matter left out. */
+  const pageText = async (name = PAGE) => (await readFile(join(HERE, "concepts", `${name}.md`), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "").trim();
   const repo = async (url: string) => (await list()).repositories.find((r) => r.url === url);
   const space = async (name: string) => (await list()).workspaces.find((w) => w.name === name);
+  /** A Concept page by name, or why there is none. */
+  const concept = (name: string) => once(`concept-${randomBytes(4).toString("hex")}`, "graph/graph-get", { node_type: "Concept", name });
+  /** A page under `Codebase`, as stadeum/pods writes a workspace's at the
+   *  bake (and the dream, later, a repository's). Its ref_id. */
+  const bake = async (name: string) => {
+    const made = await once(`bake-${name}`, "graph/create-node", {
+      node_type: "Concept",
+      node_data: { name, description: `The ${name}: its systems and how they connect.`, docs: "```mermaid\nflowchart LR\n  app -->|API_URL| api\n```\n" },
+    });
+    const root = await concept("Codebase");
+    await once(`bake-${name}-under`, "graph/create-triplet", { source_ref_id: root.ref_id, target_ref_id: made.ref_id, edge_type: "PARENT_OF" });
+    return made.ref_id as string;
+  };
 
   /** The private repositories: bare ones served behind TOKEN, their https
    *  addresses, and a working copy that pushes a new commit to them. */
@@ -379,7 +392,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.4.0");
+    assert.equal(pkg.version, "0.5.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     assert.ok(job.params.tools.includes("stadeum/code/repositories"), "the job agent is granted the tool");
@@ -403,6 +416,12 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.match(kind.description, /Not a question about the code/);
     const page = await once("code-change-page", "graph/graph-get", { node_type: "Concept", name: PAGE });
     assert.equal(page.properties.docs.trim(), await pageText());
+  });
+
+  it("ships the Codebase page, a root, its text the file's", async () => {
+    const root = await concept("Codebase");
+    assert.equal(root.properties.docs.trim(), await pageText("Codebase"));
+    assert.match(root.properties.description, /a page for each workspace that has been baked/);
   });
 
   it("opens a Code Change job's turn with the page, the kind listed and the repositories tool granted", async () => {
@@ -544,26 +563,48 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(after.problem, undefined);
   });
 
-  it("answers the job agent's tool with the list, and no admin flag", async () => {
+  it("gives a baked workspace its page, the Concept `<workspace> workspace`, and none to one never baked", async () => {
+    assert.equal((await space("stadeum")).page, undefined, "not baked: no page");
+    // The bare name is the main repository's page, not the workspace's.
+    await bake("strut-code");
+    const stadeum = await bake("stadeum workspace");
+    const codeSpace = await bake("strut-code workspace");
+    assert.deepEqual((await space("stadeum")).page, { name: "stadeum workspace", ref_id: stadeum });
+    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: PODS, repositories: [PODS, CODE], page: { name: "strut-code workspace", ref_id: codeSpace } });
+    // A member sees it too: the link is every person's.
+    const seen = await member()("stadeum/code/repositories");
+    assert.deepEqual(seen.result.workspaces.find((w: any) => w.name === "stadeum").page, { name: "stadeum workspace", ref_id: stadeum });
+  });
+
+  it("answers the job agent's tool with the list, each baked workspace's page, and no admin flag", async () => {
     const out = await once("tool", "stadeum/code/repositories", {}, "ada");
     assert.equal(out.admin, undefined);
     assert.deepEqual(out.workspaces.map((w: any) => w.name), ["stadeum", "strut-code"]);
+    assert.deepEqual(out.workspaces.map((w: any) => w.page?.name), ["stadeum workspace", "strut-code workspace"]);
     assert.deepEqual(out.repositories.map((r: any) => r.url), [CODE, PODS]);
   });
 
-  it("removes a repository from every workspace, and a workspace left empty goes", async () => {
+  it("removes a repository from every workspace, and a workspace left empty goes, its page with it", async () => {
+    const pageOf = async (name: string) => (await space(name))?.page;
+    const kept = await pageOf("strut-code");
     const one = await admin()("stadeum/code/remove", { url: PODS });
     assert.equal(one.error, undefined, one.error);
     assert.deepEqual(one.result, { removed: PODS, left: ["strut-code"], deleted: ["stadeum"] });
-    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: CODE, repositories: [CODE] }, "its main moved to the one left");
+    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: CODE, repositories: [CODE], page: kept }, "its main moved to the one left, its page kept");
+    assert.match(String(await concept("stadeum workspace")), /node not found: Concept "stadeum workspace"/, "the empty workspace's page went with it");
+    assert.equal((await concept("strut-code workspace")).ref_id, kept!.ref_id);
     const two = await admin()("stadeum/code/remove", { url: CODE });
     assert.deepEqual(two.result.deleted, ["strut-code"]);
     assert.deepEqual(await list(), { repositories: [], workspaces: [], admin: true });
-    // Added again, it starts over as new: its own workspace, ingested once more.
+    assert.match(String(await concept("strut-code workspace")), /node not found/);
+    assert.equal((await concept("strut-code")).name, "strut-code", "the repository's own page is not the workspace's");
+    assert.equal((await concept("Codebase")).name, "Codebase", "and the root stays");
+    // Added again, it starts over as new: its own workspace, ingested once more, with no page until it is baked again.
     assert.equal((await add(admin(), CODE)).status, "success");
     const back = await repo(CODE);
     assert.deepEqual(back.workspaces, ["strut-code"]);
     assert.equal(back.ingested, back.head);
+    assert.equal((await space("strut-code")).page, undefined);
   });
 
   it("reads a private repository with the caller's own token for its host, and refuses it without one", async () => {
@@ -731,9 +772,13 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     for (const token of [TOKEN, WRONG]) assert.equal(all.includes(token), false, "a token is never said");
   });
 
-  it("goes with the package: the Code Change page, its place under Job and the job's tool", async () => {
+  it("goes with the package: the Code Change page, its place under Job and the job's tool; Codebase stays while a page hangs under it", async () => {
     const res = await strut.app.request("/packages/stadeum/code", { method: "DELETE", headers: { "x-strut-actor": "root" } });
-    assert.equal(res.status, 200, await res.text());
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body));
+    // A page that is not the package's (here the repository's own) is under it.
+    assert.deepEqual(body.kept.filter((k: any) => k.kind === "concept"), [{ kind: "concept", name: "Codebase", reason: "strut-code hangs under it and stays, so it stays too" }]);
+    assert.equal((await concept("Codebase")).name, "Codebase");
     const job = await once("job-kinds-after", "graph/graph-get", { node_type: "Concept", name: "Job", children: "PARENT_OF" });
     assert.equal(job.children.find((c: any) => c.name === PAGE), undefined, "no longer a kind");
     const gone = await once("code-change-page-after", "graph/graph-get", { node_type: "Concept", name: PAGE });

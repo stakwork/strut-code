@@ -21,8 +21,8 @@ cannot read the repository, its `problem` says so and names them.
 ## The contract
 
 Another package reads these nodes without requiring `stadeum/code`. These
-fields and the link are what it may rely on. Only `stadeum/code` writes
-them.
+fields, the link and a workspace's page are what it may rely on. Only
+`stadeum/code` writes the nodes and the link.
 
 ### `Repository`
 
@@ -54,11 +54,31 @@ workspace. A repository can be in several workspaces, and is always in
 one at least. A repository added to the list gets a workspace of its own,
 named after it (or after its owner and its name, when that name is
 taken). Removing a repository takes it out of every workspace, and a
-workspace left with none is deleted. When a workspace's main repository
-leaves it, the next one by name becomes its main.
+workspace left with none is deleted, its page with it. When a workspace's
+main repository leaves it, the next one by name becomes its main.
 
 To read a workspace's repositories, main first: find the `Workspace` by
 `name` (`graph/find`), take its `INCLUDES` neighbours
 (`graph/graph-neighbors`), and put the one whose `url` is its `main`
 first. No `Workspace` of that name means the box has none: the package is
 not installed, or nobody made it.
+
+### A workspace's page
+
+A workspace that has been baked has a page: the Concept `<workspace>
+workspace` (`hive workspace`), under `Codebase` and under `Pod`. The
+`stadeum/pods` package writes it at the bake: a diagram of the
+workspace's systems, each arrow a real connection labelled with the
+setting that points it, then the system in words, then how to run it.
+A workspace never baked has none.
+
+It is a page, not a field on the `Workspace` node, which keeps only its
+`name`, its `main` and its `INCLUDES` links. A page carries claims, cases
+and tests, and the history keeps each edit with the run that made it.
+It is not named with the bare name: a workspace is named after its main
+repository by default, and the bare name is that repository's page.
+
+To read it, open the Concept by that name (`graph_graph_get { node_type:
+"Concept", name: "hive workspace" }`). The `repositories` tool gives a
+workspace's `page` when it has one, and the Code app links to it in the
+Knowledge app.

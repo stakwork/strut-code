@@ -1,6 +1,6 @@
 package: stadeum/code
-version: 0.4.0
-description: The box's repositories and the workspaces they are grouped in, the Code app where they are set up, a check for new commits every 15 minutes, the repositories tool and strut's git/push for the job agent, and the Code Change page a job that changes one of them follows. It names no forge.
+version: 0.5.0
+description: The box's repositories and the workspaces they are grouped in, the Code app where they are set up, a check for new commits every 15 minutes, the repositories tool and strut's git/push for the job agent, the Code Change page a job that changes one of them follows, and the Codebase page each workspace's page goes under. It names no forge.
 job:
   # Its own `repositories`, and strut's `git/push`: a small change is pushed
   # as the job's person to a new branch, never the default one, from the

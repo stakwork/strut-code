@@ -15,6 +15,12 @@ export const INCLUDES = "INCLUDES";
 /** A workspace's name: what pods' `claim { workspace }` takes. */
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 
+/** A workspace's page: the Concept `<workspace> workspace`, which
+ *  stadeum/pods writes at the bake. Not the bare name: that is its main
+ *  repository's page. */
+export const CONCEPT = "Concept";
+export const pageName = (workspace: string) => `${workspace} workspace`;
+
 interface StepDef {
   input: { parse(v: unknown): unknown };
   run(cfg: unknown, ctx: unknown): Promise<unknown>;
@@ -92,6 +98,8 @@ export interface Space {
   main?: string;
   /** Its repositories' addresses, the main one first, then by name. */
   repositories: string[];
+  /** Its page, when it has been baked: the Concept `<name> workspace`. */
+  page?: { name: string; ref_id: string };
 }
 
 export interface List {
@@ -133,16 +141,32 @@ export async function readList(ctx: Ctx): Promise<List> {
     }
   }
   const nameOf = new Map(repos.map((r) => [r.url, r.name]));
+  const pages = await pagesOf(ctx, spaceNodes.map((n) => text(n.properties["name"])).filter((s): s is string => !!s));
   const workspaces = spaceNodes
     .map((n): Space => {
+      const name = text(n.properties["name"]) ?? "";
       const main = text(n.properties["main"]);
       const urls = [...(members.get(n.ref_id) ?? [])].sort((a, b) => (a === main ? -1 : b === main ? 1 : (nameOf.get(a) ?? a).localeCompare(nameOf.get(b) ?? b) || a.localeCompare(b)));
-      return { ref_id: n.ref_id, name: text(n.properties["name"]) ?? "", ...(main ? { main } : {}), repositories: urls };
+      const page = pages.get(pageName(name));
+      return { ref_id: n.ref_id, name, ...(main ? { main } : {}), repositories: urls, ...(page ? { page: { name: pageName(name), ref_id: page } } : {}) };
     })
     .filter((w) => w.name)
     .sort((a, b) => a.name.localeCompare(b.name));
   repos.sort((a, b) => a.name.localeCompare(b.name) || a.url.localeCompare(b.url));
   return { repositories: repos, workspaces };
+}
+
+/** The workspaces' pages there are, each name's ref_id: one read per 500. */
+async function pagesOf(ctx: Ctx, workspaces: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const names of chunks(workspaces.map(pageName), 500)) {
+    const { nodes } = await graph<{ nodes: Found[] }>(ctx, "find", { node_type: CONCEPT, where: { name: { in: names } }, limit: 500 });
+    for (const n of nodes) {
+      const name = text(n.properties["name"]);
+      if (name) out.set(name, n.ref_id);
+    }
+  }
+  return out;
 }
 
 /** One repository by its address, or none. */
@@ -151,7 +175,9 @@ export async function findRepository(ctx: Ctx, url: string): Promise<Repo | unde
   return nodes[0] ? toRepo(nodes[0]) : undefined;
 }
 
-/** The list as a reader is given it: no graph ids, each repository with its workspaces. */
+/** The list as a reader is given it: no ids of its own nodes, each
+ *  repository with its workspaces. A workspace's page keeps its ref_id:
+ *  the Knowledge app opens a page by it. */
 export function view(list: List) {
   return {
     repositories: list.repositories.map(({ ref_id: _ref, ...r }) => ({ ...r, workspaces: list.workspaces.filter((w) => w.repositories.includes(r.url)).map((w) => w.name) })),
@@ -360,11 +386,13 @@ async function newWorkspace(ctx: Ctx, name: string, main: string): Promise<Writt
   return graph<Written>(ctx, "create-node", { node_type: WORKSPACE, node_data: { name, main } });
 }
 
-/** Take `url` out of a workspace: a workspace left empty goes; one whose
- *  main it was takes its next repository as main. */
+/** Take `url` out of a workspace: a workspace left empty goes, and its
+ *  page with it; one whose main it was takes its next repository as main. */
 async function leave(ctx: Ctx, space: Space, repo: Repo): Promise<"left" | "deleted"> {
-  await unlink(ctx, space.ref_id, repo.ref_id);
   const rest = space.repositories.filter((u) => u !== repo.url);
+  // The page first: a refusal leaves the workspace and its page as they were.
+  if (!rest.length && space.page) await graph(ctx, "delete-node", { ref_id: space.page.ref_id, reason: `its workspace, ${space.name}, went with its last repository, ${repo.url}` });
+  await unlink(ctx, space.ref_id, repo.ref_id);
   if (!rest.length) {
     await graph(ctx, "delete-node", { ref_id: space.ref_id, reason: `its last repository, ${repo.url}, left it` });
     return "deleted";

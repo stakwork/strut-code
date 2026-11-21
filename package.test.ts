@@ -6,7 +6,11 @@
  * drives it (an admin's call and a member's), as the schedule runs `check`,
  * and as the job agent calls `repositories`. A job of the kind `Code Change`
  * is launched too, to see its turn open with the package's page: the model
- * is stood in for by an `agent` step that records what the turn gave it.
+ * is stood in for through strut's hook on every model it builds, recording
+ * what each turn gave it. For a small change it is scripted (strut's own
+ * mock model): it checks the repository out, edits it and pushes a new
+ * branch with strut's `git/push`, as the job's person, and is refused the
+ * default branch.
  *
  * It reaches github.com: the public repositories it adds are this package's
  * own and stadeum/pods', and a missing one is refused as a private one is,
@@ -29,6 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { address, askRemote, remoteProblem, workspaceName, workspaceNames } from "./steps/_code.ts";
+import { addressToAdd } from "./apps/code/src/input.ts";
 
 const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
 // Nobody's token: not this machine's, not its git's. github.com is read with none.
@@ -141,6 +146,30 @@ describe("an address", () => {
     assert.equal(remoteProblem(url, `remote_empty: ${url} has no commits yet: its remote names no head`), `${url} has no commits yet: its remote names no head`);
   });
 
+  it("fills the Code app's Add field from the address it is opened with, for an admin alone, and adds nothing", async () => {
+    // The link another app opens it with (stadeum/github's picker), read back
+    // as a host reads it: `?input=` as flat strings, the app's tool input.
+    const { appLink } = (await import(pathToFileURL(join(STRUT, "kit", "src", "links.ts")).href)) as { appLink: (name: string, input?: Record<string, string>) => string };
+    const opened = (input: Record<string, string>) => Object.fromEntries(new URLSearchParams(new URLSearchParams(appLink(APP, input).slice(1)).get("input") ?? ""));
+    assert.equal(addressToAdd(opened({ add: CODE }), true), CODE);
+    assert.equal(addressToAdd({ add: `  ${CODE}.git\n` }, true), `${CODE}.git`, "trimmed, otherwise as given");
+    // A member's app draws no Add, and the input changes nothing.
+    assert.equal(addressToAdd(opened({ add: CODE }), false), undefined);
+    // Only an https address fills it: anything else leaves the app as it is.
+    for (const input of [undefined, {}, { view: CODE }, { add: "" }, { add: "   " }, { add: 42 }, { add: [CODE] }, { add: "strut-code" }, { add: "git@github.com:stakwork/strut-code.git" }, { add: "ssh://git@github.com/stakwork/strut-code" }, { add: "http://github.com/stakwork/strut-code" }, { add: "file:///etc/passwd" }, { add: "javascript:alert(1)" }]) {
+      assert.equal(addressToAdd(input, true), undefined, JSON.stringify(input));
+    }
+    // Filled as given: Add checks it then exactly as one typed (`add` runs `address`).
+    for (const [given, why] of [
+      ["https://user:token@github.com/stakwork/strut-code", /no user name or token/],
+      ["https://github.com/stakwork/strut-code?x=1", /no \? or # part/],
+      ["https://github.com/stakwork", /owner and its name/],
+    ] as const) {
+      assert.equal(addressToAdd({ add: given }, true), given);
+      assert.throws(() => address(addressToAdd({ add: given }, true)), why, given);
+    }
+  });
+
   it("says plainly what an older strut lacks: the step it asks a remote with", async () => {
     await assert.rejects(askRemote({ registry: {} }, CODE), /strut's git\/remote-head step, and this strut server has none: it needs a newer strut \(the step came with stakwork\/strut#798/);
   });
@@ -158,6 +187,9 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   /** What the job agent's model was handed on each turn: the system prompt,
    *  the turn's prompt and its tools' names. */
   const turns: Array<{ prompt: string; system: string; tools: string[] }> = [];
+  /** The model's answers for the next job's run, when it is scripted
+   *  (strut's mock model); otherwise the turn ends once it is recorded. */
+  let script: unknown[] | undefined;
 
   /** A call from an app's page (the Code app's unless named), as its viewer: `admin` when strut says so. */
   const page = (actor: string, admin: boolean, app = APP) => {
@@ -260,17 +292,20 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     process.env["ANTHROPIC_API_KEY"] = "stand-in";
     delete process.env["ANTHROPIC_BASE_URL"];
     const { registerModelWrapper } = await from<any>("extensions.ts");
+    const { mockModel } = await from<any>("privacy/testing/mock-model.ts");
     registerModelWrapper((model: object) => {
-      const handed = async (options: { prompt: Array<{ role: string; content: unknown }>; tools?: Array<{ name: string }> }) => {
+      const scripted = script ? mockModel({ turns: script }) : undefined;
+      const handed = (k: "doGenerate" | "doStream") => async (options: { prompt: Array<{ role: string; content: unknown }>; tools?: Array<{ name: string }> }) => {
         const text = (c: unknown) => (typeof c === "string" ? c : (c as Array<{ text?: string }>).map((p) => p.text ?? "").join(""));
         turns.push({
           system: options.prompt.filter((m) => m.role === "system").map((m) => text(m.content)).join("\n"),
           prompt: text(options.prompt.find((m) => m.role === "user")?.content ?? ""),
           tools: (options.tools ?? []).map((t) => t.name),
         });
+        if (scripted) return scripted[k](options);
         throw new Error("stand-in model: the turn is recorded");
       };
-      return new Proxy(model, { get: (m, k) => (k === "doGenerate" || k === "doStream" ? handed : Reflect.get(m, k, m)) });
+      return new Proxy(scripted ?? model, { get: (m, k) => (k === "doGenerate" || k === "doStream" ? handed(k) : Reflect.get(m, k, m)) });
     });
     strut = await createStrut({
       workspace: new GraphWorkspaceStore(graph, { materializeDir: join(root, "steps"), appsDir: join(root, "apps") }),
@@ -344,10 +379,12 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.3.0");
+    assert.equal(pkg.version, "0.4.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     assert.ok(job.params.tools.includes("stadeum/code/repositories"), "the job agent is granted the tool");
+    assert.ok(job.params.tools.includes("git/push"), "and strut's git/push");
+    assert.ok(!(job.params.approve ?? []).includes("git/push"), "which does not ask first: the pull request is the person's review");
     const { automations } = await (await strut.app.request("/automations")).json();
     const check = automations.find((a: any) => a.package === "stadeum/code");
     assert.ok(check, "check's schedule is installed");
@@ -390,6 +427,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     // The page's first call, by the name it gives it.
     assert.ok(turn.tools.includes("stadeum_code_repositories"), turn.tools.join(", "));
     assert.ok(turn.tools.includes("git_checkout"), "and strut's checkout");
+    assert.ok(turn.tools.includes("git_push"), "and strut's push, the package's grant");
+    assert.ok(!turn.tools.includes("github_create_pr"), "no forge's package here: no pull-request tool");
     // The deeper path sends it to the `Pod` page, another kind under Job:
     // it opens a kind's page by name, as its system prompt says.
     assert.ok(turn.tools.includes("graph_graph_get"), "it can open another page");
@@ -604,6 +643,84 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     await giveCheckTo("root");
   });
 
+  it("pushes a Code Change job's small change to a new branch as the job's person, and is refused the default branch", async () => {
+    // A file to change on the private repository's default branch, trunk.
+    const bare = join(root, "remotes", "team", "secret");
+    await writeFile(join(work, "style.css"), "button { color: red; }\n");
+    git(work, "add", "style.css");
+    git(work, "commit", "--quiet", "-m", "style");
+    git(work, "push", "--quiet", bare, "trunk");
+    const trunk = git(work, "rev-parse", "HEAD");
+    // ada's own token for the host, and root's one the host refuses: a push
+    // that gets through carried ada's.
+    await ownSecret("ada", "LAB_TOKEN", TOKEN);
+    await ownSecret("root", "LAB_TOKEN", WRONG);
+    const pushesBefore = priv.seen.length;
+    const job = "code-change-small";
+    const branch = "code-change/blue-button";
+    const message = "Make the button blue";
+    let path = "";
+    const call = (id: string, toolName: string, input: unknown) => [{ type: "tool-call", toolCallId: id, toolName, input: JSON.stringify(input) }];
+    /** What a tool call of this run answered, as the model reads it back. */
+    const answered = (prompt: Array<{ role: string; content: unknown }>, id: string): string => {
+      for (const m of prompt) {
+        if (m.role !== "tool") continue;
+        for (const p of m.content as Array<{ toolCallId: string; output?: { value?: unknown } }>) {
+          if (p.toolCallId === id) return typeof p.output?.value === "string" ? p.output.value : JSON.stringify(p.output?.value ?? p.output);
+        }
+      }
+      return "";
+    };
+    let read: (id: string) => string = () => "";
+    // The page's small path, by the tools' names on a box.
+    script = [
+      call("list", "stadeum_code_repositories", {}),
+      (prompt: any) => {
+        assert.ok(answered(prompt, "list").includes(SECRET), "the box lists it");
+        return call("checkout", "git_checkout", { repo: SECRET, workdir: job });
+      },
+      (prompt: any) => {
+        path = /"path":"([^"]+)"/.exec(answered(prompt, "checkout"))?.[1] ?? "";
+        return call("edit", "bash", { command: `cd '${path}' && printf 'button { color: blue; }\\n' > style.css && git add -A` });
+      },
+      // The absolute path git_checkout returned: the default branch first, then a new one.
+      () => call("default", "git_push", { path, branch: "trunk", message }),
+      () => call("push", "git_push", { path, branch, message }),
+      (prompt: any) => {
+        read = (id) => answered(prompt, id);
+        return call("done", "final_answer", { text: `Pushed ${branch} to ${SECRET}. This box has no tool to open the pull request.`, artifacts: [] });
+      },
+    ];
+    const before = turns.length;
+    try {
+      const run = await strut.run("job", { prompt: "Make the Add button blue.", kind: PAGE }, { job, actor: "ada", principal: "ada" });
+      assert.equal(run.status, "success", JSON.stringify(run.error));
+    } finally {
+      script = undefined;
+      await ownSecret("root", "LAB_TOKEN", TOKEN);
+    }
+    assert.ok(turns[before]?.tools.includes("git_push"), "the turn holds strut's git/push");
+    assert.ok(turns[before]!.prompt.includes(await pageText()), "and opens with the page");
+    // The checkout is the job's own, at an absolute path.
+    assert.equal(path, join(root, "jobs", job, "secret"));
+    // The default branch is refused: trunk stays as it was (below).
+    assert.match(read("default"), /push_rejected: trunk is origin's default branch — git\/push pushes a branch of its own, for a pull request/, read("default"));
+    // The new branch is pushed, on trunk's head, with the change alone.
+    assert.match(read("push"), new RegExp(`"branch":"${esc(branch)}"`), read("push"));
+    const heads = git(bare, "for-each-ref", "--format=%(refname:short) %(objectname) %(authorname)", "refs/heads/").split("\n").sort();
+    assert.equal(heads.length, 2, heads.join("\n"));
+    assert.equal(heads[1], `trunk ${trunk} test`, "trunk as it was");
+    assert.match(heads[0]!, new RegExp(`^${esc(branch)} [0-9a-f]{40} strut$`), "authored as strut: the token is not GitHub's");
+    assert.equal(git(bare, "rev-parse", `${branch}^`), trunk);
+    assert.equal(git(bare, "show", `${branch}:style.css`), "button { color: blue; }");
+    assert.equal(git(bare, "diff", "--name-only", trunk, branch), "style.css");
+    // As ada: the push carried her token, the only one the host takes.
+    const pushes = priv.seen.slice(pushesBefore).filter((r) => r.path.includes("git-receive-pack"));
+    assert.ok(pushes.length > 0, "a push reached the host");
+    assert.ok(pushes.some((r) => r.password === TOKEN), "with ada's token");
+    assert.ok(priv.seen.slice(pushesBefore).every((r) => r.password !== WRONG), "never root's");
+  });
+
   it("never puts a token in a node, a run's output or an error", async () => {
     const said: string[] = [JSON.stringify(await list()), JSON.stringify(await once("repository-nodes", "graph/find", { node_type: "Repository" }))];
     for (const events of store.events.values()) said.push(JSON.stringify(events));
@@ -621,6 +738,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(job.children.find((c: any) => c.name === PAGE), undefined, "no longer a kind");
     const gone = await once("code-change-page-after", "graph/graph-get", { node_type: "Concept", name: PAGE });
     assert.match(String(gone), /node not found: Concept "Code Change"/);
-    assert.ok(!(await strut.workspace.getWorkflow("job")).params.tools.includes("stadeum/code/repositories"));
+    const tools = (await strut.workspace.getWorkflow("job")).params.tools;
+    assert.ok(!tools.includes("stadeum/code/repositories"));
+    assert.ok(!tools.includes("git/push"), "strut's git/push goes with the grant");
   });
 });

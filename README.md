@@ -2,8 +2,9 @@
 
 The `stadeum/code` package for [strut](https://github.com/stakwork/strut):
 the repositories a box works on, the workspaces they are grouped in, and
-the Code app where they are set up, and the `Code Change` page, which a job
-that changes one of them follows. It names no forge: any https git remote
+the Code app where they are set up; the `Code Change` page, which a job
+that changes one of them follows; and the `Codebase` page, the root each
+workspace's page goes under. It names no forge: any https git remote
 works the same, and a GitLab or Forgejo package would use it whole.
 
 A private repository is read as a person, with their own token for its
@@ -17,13 +18,14 @@ host or secret.
 | Part | What |
 | --- | --- |
 | `graph/Repository.yaml`, `graph/Workspace.yaml` | The two graph types, and the `Workspace -[INCLUDES]-> Repository` link |
-| `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, how to read a workspace main first) |
+| `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, how to read a workspace main first, a workspace's page) |
 | `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
-| `apps/code/` | **Code**, every person's app: the repositories by workspace, each with its branch and when it was last checked. For an admin it also adds a repository by its https address, removes one, puts one in one workspace or several, and names each workspace's main one. Opened with an address (`add`), it fills an admin's Add field with it (`src/input.ts`) |
+| `concepts/Codebase.md` | The `Codebase` page, a root: short, and it stays as it is. Under it go a page for each workspace that has been baked, and later a page for each repository and each feature |
+| `apps/code/` | **Code**, every person's app: the repositories by workspace, each with its branch and when it was last checked, and a link to each baked workspace's page in the Knowledge app. For an admin it also adds a repository by its https address, removes one, puts one in one workspace or several, and names each workspace's main one. Opened with an address (`add`), it fills an admin's Add field with it (`src/input.ts`) |
 | `workflows/add.yaml` | The admin's Add: `add`, then `ingest` once |
 | `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested |
 | `workflows/ingest.yaml` | Takes a repository in at its head. Today it only records the commit: a parser plugs in here, before `record` |
-| `steps/repositories.ts` | The job agent's tool (`job: tools:`) and the app's read: every repository and workspace the box holds |
+| `steps/repositories.ts` | The job agent's tool (`job: tools:`) and the app's read: every repository and workspace the box holds, and each workspace's page |
 | `strut.yaml` `job:` | The job agent's tools: `repositories`, and strut's own `git/push`, which pushes a small change to a new branch as the job's person |
 | `steps/add.ts`, `remove.ts`, `place.ts`, `main.ts` | The admin's changes, each refused to anyone else |
 | `steps/heads.ts` | `check`'s pass: strut's `git/remote-head` on each remote, four at a time, as the run's person |
@@ -79,8 +81,20 @@ How it holds together:
 - **A repository is always in a workspace.** A new one gets its own, named
   after it (then after its owner and name, then numbered, when the name is
   taken). Removing a repository takes it out of every workspace; a
-  workspace left empty goes, and one whose main left takes its next
-  repository as main.
+  workspace left empty goes, its page with it, and one whose main left
+  takes its next repository as main.
+- **A workspace's page is a Concept, not a field.** The `Workspace` node
+  keeps its `name`, `main` and `INCLUDES` links alone. What its systems
+  are and how they connect is the Concept `<workspace> workspace` (`hive
+  workspace`), which `stadeum/pods` writes at the bake, under `Codebase`
+  and `Pod`: a Mermaid diagram, the system in words, how to run it. The
+  bare name is the main repository's page. `repositories` finds each
+  workspace's page by that name (`graph/find`) and gives it as `page`;
+  the Code app links to it in strut's Knowledge app (`appLink(
+  "strut/knowledge", { node: <its ref_id> })`) and shows nothing when
+  there is none. The step that deletes an empty workspace deletes its
+  page first, through strut's `graph/delete-node` like the node (soft:
+  the history keeps it, and a later bake writes it again).
 
 It requires no secret of its own, and a strut with the `git/remote-head`
 step (stakwork/strut#798, 2026-11-20) and the grant of strut's own steps
@@ -151,6 +165,11 @@ forge's, granted by that forge's package; this one names none.
 
 ## Versions
 
+- **0.5.0** The `Codebase` root page. `Repositories` says that a
+  workspace's page is the Concept `<workspace> workspace`, written by
+  `stadeum/pods` at the bake. `repositories` gives each workspace's
+  `page`, the Code app links to it in the Knowledge app, and a workspace
+  that goes takes its page with it.
 - **0.4.0** The job agent is granted strut's `git/push`, so a small
   change ends as a pushed branch and, where the box has a pull-request
   tool, a pull request. The `Code Change` page names each tool as the
@@ -201,8 +220,12 @@ lists the repositories, checks the private one out into the job's
 directory, edits and stages it, is refused its default branch, and
 pushes a new branch with the person's own token. The Code app's Add field
 is read from a link as stadeum/github's picker makes it, for an admin, a
-member and inputs that are not https addresses. Uninstalling drops the
-page and the grant.
+member and inputs that are not https addresses. A workspace's page is
+written under `Codebase` as pods writes it at the bake: `repositories`
+gives it to the app, a member and the job agent, never the bare-named
+page, and removing the workspace's last repository deletes it. Uninstalling
+drops the `Code Change` page and the grant; `Codebase` stays while a page
+that is not the package's hangs under it (strut's rule).
 It reaches github.com, adding public repositories. A private one is served
 from the test's own machine over http behind a token, its https address
 pointed there by git's `insteadOf` (strut's `test-util/git-remote.ts`), and

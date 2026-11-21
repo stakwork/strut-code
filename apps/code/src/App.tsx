@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useStrutClient, useToolInput } from "@strut/kit";
-import { FolderGit2, GitBranch, MoreHorizontal, Plus, Star } from "lucide-react";
+import { appLink, useHost, useStrutClient, useToolInput } from "@strut/kit";
+import { BookOpen, FolderGit2, GitBranch, MoreHorizontal, Plus, Star } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -29,6 +29,8 @@ const ADD = "stadeum/code/add";
 const REMOVE = "stadeum/code/remove";
 const PLACE = "stadeum/code/place";
 const MAIN = "stadeum/code/main";
+/** Strut's Knowledge app, which opens a node by its ref_id (`node`). */
+const KNOWLEDGE = "strut/knowledge";
 
 interface Repository {
   url: string;
@@ -43,6 +45,8 @@ interface Workspace {
   name: string;
   main?: string;
   repositories: string[];
+  /** Its page, the Concept `<name> workspace`, once it has been baked. */
+  page?: { name: string; ref_id: string };
 }
 interface List {
   repositories: Repository[];
@@ -68,6 +72,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).rep
 export default function App() {
   const client = useStrutClient();
   const qc = useQueryClient();
+  const host = useHost();
   const input = useToolInput();
   const list = useQuery({ queryKey: ["code", "list"], queryFn: () => client.run<List>(LIST), refetchInterval: 30_000 });
   const [error, setError] = useState<string>();
@@ -141,8 +146,14 @@ export default function App() {
 
       {data?.workspaces.map((w) => (
         <Card key={w.name} className="gap-2 py-4">
-          <CardHeader className="px-4">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
             <CardTitle className="font-mono text-base">{w.name}</CardTitle>
+            {w.page && (
+              <Button variant="link" size="sm" className="h-auto gap-1 p-0" title={`${w.page.name}, in the Knowledge app`} onClick={() => void host.openLink(appLink(KNOWLEDGE, { node: w.page!.ref_id }))}>
+                <BookOpen className="size-3.5" />
+                its page
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="flex flex-col divide-y px-4">
             {w.repositories.map((url) => {
@@ -203,7 +214,7 @@ export default function App() {
             <AlertDialogHeader>
               <AlertDialogTitle>Remove {removing.name}?</AlertDialogTitle>
               <AlertDialogDescription>
-                {removing.url} comes off the box's list and out of {removing.workspaces.length === 1 ? `its workspace, ${removing.workspaces[0]}` : `its ${removing.workspaces.length} workspaces`}. A workspace it leaves empty goes too.
+                {removing.url} comes off the box's list and out of {removing.workspaces.length === 1 ? `its workspace, ${removing.workspaces[0]}` : `its ${removing.workspaces.length} workspaces`}. A workspace it leaves empty goes too, and its page with it.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

@@ -1,7 +1,4 @@
-description: >-
-  Take in a repository at its head. Today it only records the commit; a parser
-  plugs in here, before `record`. `check` runs it when a head moved, and `add`
-  once when a repository is added.
+description: Take in a repo's latest commit.
 input:
   url:
     type: string

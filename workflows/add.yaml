@@ -1,6 +1,4 @@
-description: >-
-  Add a repository to the box's list by its https address (an admin's, from the
-  Code app), then run `ingest` on it once.
+description: Add a repo by its URL.
 input:
   url:
     type: string

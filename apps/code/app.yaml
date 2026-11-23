@@ -1,5 +1,5 @@
 title: Code
-description: The box's repositories, by workspace, each with its branch and when it was last checked. An admin adds and removes them, and groups them in workspaces.
+description: Your repos, grouped by workspace. Admins add repos and set up workspaces.
 icon: folder-git-2
 entry: src/App.tsx
 grants:

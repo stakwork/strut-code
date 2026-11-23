@@ -1,6 +1,10 @@
-type_description: A set of the box's repositories worked on together, one of them its main one. Kept by the stadeum/code package; the Repositories page says what each field holds.
+type_description: A set of the box's repositories worked on together, what a pod is claimed for and set up for. Kept by the stadeum/code package; the Repositories page says what each field holds.
 attributes:
   name: string
+  # Written by 0.6 and before, the workspace's main repository. A workspace
+  # has none now: nothing writes or reads it, and `check` clears it. Kept
+  # declared so nodes that still carry it read as before; a later version
+  # drops it.
   main: ?string
 key_spec: name
 index: [name]

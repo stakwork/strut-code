@@ -1,4 +1,4 @@
-type_description: A git repository the box works on, by its https address. Kept by the stadeum/code package; the Repositories page says what each field holds.
+type_description: A git repository the box works on, by its https address, while it is in one of the box's workspaces. Kept by the stadeum/code package; the Repositories page says what each field holds.
 attributes:
   url: string
   name: string

@@ -1,16 +1,22 @@
 import { z, defineStep } from "strut";
-import { asCtx, mayChange, readList, view } from "./_code.js";
+import { asCtx, mayChange, reach, readList, suggestion, view } from "./_code.js";
 
 export default defineStep({
   type: "stadeum/code/repositories",
   description:
-    "What repositories and workspaces this box holds. Each repository: its https `url`, `name`, default `branch`, the `head` commit last seen on it, " +
-    "when it was `checked`, the commit last `ingested`, a `problem` when its last check failed, and the `workspaces` it is in. " +
-    "Each workspace: its `name` (what a pod is claimed for), its `main` repository's url, its `repositories`' urls, the main one first, " +
-    "and its `page` once it has been baked: the Concept `<name> workspace`, a diagram of its systems and how they connect, the system in words and how to run it. " +
-    "Clone a repository by its `url`; work on its default `branch`. A person adds repositories in the Code app.",
+    "The box's workspaces and their repositories, and what each forge's token reaches as you. " +
+    "Each workspace: its `name` (what a pod is claimed for), its `repositories`' urls, and its `page` once it has been baked: " +
+    "the Concept `<name> workspace`, a diagram of its systems and how they connect, the system in words and how to run it. " +
+    "Each repository the box holds: its https `url`, `name`, default `branch`, the `head` commit last seen on it, when it was `checked`, the commit last `ingested`, " +
+    "a `problem` when its last check failed, and the `workspaces` it is in. " +
+    "`reachable`: every repository the forges' tokens reach as you (strut's git/repositories), whether or not the box holds it, each with its `url`, `name`, " +
+    "whether it is `private`, when it was `pushed` and its `description`; `hosts` says which forges were asked, and why one reached nothing. " +
+    "While the box has no workspace, `suggested` is the default one from what you reach, written only when a person presses Set up in the Code app. " +
+    "Clone a repository by its `url`; work on its default `branch`. Make a workspace, or add to one, with stadeum_code_workspace.",
   effect: "read",
-  input: z.object({}),
+  input: z.object({
+    reachable: z.boolean().optional().describe("Also list what the forges reach (default true). False reads only the box's own"),
+  }),
   output: z.object({
     repositories: z.array(
       z.object({
@@ -27,15 +33,38 @@ export default defineStep({
     workspaces: z.array(
       z.object({
         name: z.string(),
-        main: z.string().optional(),
         repositories: z.array(z.string()),
         page: z.object({ name: z.string(), ref_id: z.string() }).optional().describe("Its page, the Concept `<name> workspace`: absent until the workspace is baked."),
       }),
     ),
-    admin: z.boolean().optional().describe("On a page's call: whether this call may change the list (an admin, in the Code app)."),
+    reachable: z
+      .array(
+        z.object({
+          url: z.string(),
+          name: z.string(),
+          private: z.boolean().optional(),
+          pushed: z.string().optional(),
+          description: z.string().optional(),
+          picked: z.boolean().optional(),
+        }),
+      )
+      .optional(),
+    hosts: z.array(z.object({ host: z.string(), problem: z.string().optional() })).optional(),
+    reach_problem: z.string().optional().describe("Why nothing could be asked of the forges"),
+    suggested: z
+      .object({ name: z.string(), repositories: z.array(z.string()) })
+      .optional()
+      .describe("While the box has no workspace: the default one, suggested, from what the forges reach. Nothing is written until a person presses Set up"),
+    may: z.boolean().optional().describe("On a page's call: whether this viewer may make and change workspaces here."),
   }),
-  async run(_cfg, ctx) {
+  async run(cfg, ctx) {
     const c = asCtx(ctx);
-    return { ...view(await readList(c)), ...(c.app ? { admin: mayChange(c) } : {}) };
+    const [list, reached] = await Promise.all([readList(c), cfg.reachable === false ? undefined : reach(c)]);
+    return {
+      ...view(list),
+      ...(reached ? { reachable: reached.repositories, hosts: reached.hosts, ...(reached.problem ? { reach_problem: reached.problem } : {}) } : {}),
+      ...(reached && suggestion(list, reached) ? { suggested: suggestion(list, reached) } : {}),
+      ...(c.app ? { may: mayChange(c) } : {}),
+    };
   },
 });

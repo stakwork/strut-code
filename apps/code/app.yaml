@@ -1,11 +1,14 @@
 title: Code
-description: Your repos, grouped by workspace. Admins add repos and set up workspaces.
+description: Make workspaces from your repos. Jamie sets each one up for jobs.
 icon: folder-git-2
 entry: src/App.tsx
 grants:
-  # `add` checks the address, asks the remote, then runs `ingest` once.
-  workflows: [stadeum/code/add]
-  # Everyone reads the list; the rest are an admin's, and refuse anyone else.
-  steps: [stadeum/code/repositories, stadeum/code/remove, stadeum/code/place, stadeum/code/main]
+  workflows: []
+  # `repositories` reads the workspaces and what the viewer's forges reach,
+  # with the suggested default while the box has none; `workspace` makes
+  # one or changes its repositories, `default-workspace` is the suggested
+  # one's Set up, `rename` and `delete` the rest. Anyone makes and changes
+  # workspaces, each as themselves (steps/_code.ts `refusal`).
+  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete]
   sqlite: false
   automations: []

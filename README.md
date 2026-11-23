@@ -168,6 +168,10 @@ forge's, granted by that forge's package; this one names none.
 
 ## Versions
 
+- **0.6.2** `Code Change` §6: checks still running when the turn ends
+  aren't waited on. If they fail later, strut sends the job one turn to fix
+  them, once per pull request (stakwork/strut#835's `job/pr-checks`, run by
+  stadeum/github 0.3.0's schedule), and the page says so.
 - **0.6.1** `Code Change` §4 says what a pod is for:
   - A tool the build needs that the pod can run goes in the workspace's
     image (`.pod/`'s `Dockerfile`, then bake), not one job's shell.

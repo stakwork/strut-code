@@ -63,7 +63,8 @@ request of its own, then the change in another. Say so in `text`.
 
 No pod (no `stadeum_pods_claim` among your tools, or the claim fails):
 make the change in a checkout as in 3, and say plainly in `text` that
-nothing was run, no app and no tests, and why.
+nothing was run here, no app and no tests, and why. The pull request's
+checks (6) are then what runs it.
 
 ## 5. How it ends
 
@@ -79,3 +80,19 @@ nothing was run, no app and no tests, and why.
   (`no_push_permission:`, or a token that isn't set) means their account
   for that host isn't connected to this box, or can't push there: ask
   them to connect it, or to get access, then to ask again.
+
+## 6. The pull request's checks
+
+The repository's CI runs the change too, including what nothing here can
+run (a build or a platform this box or the pod lacks). Once the pull
+request is open, read its checks with your tool for the repository's host
+(`github_pr_status` for github.com):
+
+- Still running when you're done: say so, with the link. Don't wait on
+  them; the person can ask you to look again.
+- Failed: it's yours. Read why (`logs: true`), fix it on the same branch,
+  push, and say what failed and what you changed.
+- Passed: say what they ran. The change is tested only by what you saw
+  pass, here or there.
+
+What reviewers said on the pull request is `github_fetch_pr`'s.

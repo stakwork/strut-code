@@ -131,12 +131,19 @@ it acts:
    bare pod, no image) is set up on the way, as `Pod` says, its `.pod/`
    in a pull request of its own. Without the pods package, or when the
    claim fails, the change is made in the checkout, and the reply says
-   plainly that nothing was run.
+   plainly that nothing was run here.
 5. **It ends in a pull request as the person**, on a new branch, never a
    push to the default branch; a later turn's change lands in the same
    pull request. When the branch can't be pushed (the person's account
    for that host isn't connected to the box, or can't push there), the
    reply says so in plain words and hands over the diff.
+6. **The pull request's checks** run the change where nothing here can:
+   an Android build on a pod without Android, or any change made without
+   a pod. The agent reads them with the forge's tool (`github_pr_status`,
+   which `stadeum/github` grants): still running, it says so and doesn't
+   wait; failed, it reads why (`logs: true`, each failed job's log in a
+   file it searches), fixes it on the same branch and pushes; passed, it
+   says what they ran. What reviewers said is `github_fetch_pr`'s.
 
 The page names each tool as the job agent sees it on a box: a step's
 type with every `/` and `-` made `_` (`git/push` is `git_push`,
@@ -161,6 +168,10 @@ forge's, granted by that forge's package; this one names none.
 
 ## Versions
 
+- **0.6.0** The `Code Change` page reads the pull request's checks after
+  opening it: CI is where a change runs that nothing here can, so a
+  failed check is the agent's to read and fix, and a change is called
+  tested only on what it saw pass. The tools are `stadeum/github` 0.2.0's.
 - **0.5.0** The `Codebase` root page. `Repositories` says that a
   workspace's page is the Concept `<workspace> workspace`, written by
   `stadeum/pods` at the bake. `repositories` gives each workspace's

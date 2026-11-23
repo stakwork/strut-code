@@ -1,11 +1,7 @@
 # strut-code
 
-The `stadeum/code` package for [strut](https://github.com/stakwork/strut):
-the repositories a box works on, the workspaces they are grouped in, and
-the Code app where they are set up; the `Code Change` page, which a job
-that changes one of them follows; and the `Codebase` page, the root each
-workspace's page goes under. It names no forge: any https git remote
-works the same, and a GitLab or Forgejo package would use it whole.
+Your team's repos on Stadeum: add them, group them into workspaces, and
+agents keep up with every new commit.
 
 A private repository is read as a person, with their own token for its
 host: the admin who adds it, and for the scheduled `check` the `check`

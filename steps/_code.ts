@@ -204,16 +204,17 @@ export function view(list: List) {
 export const CODE_APP = "stadeum/code/code";
 
 /**
- * Who makes and changes workspaces: the owner's call (open question 20 of
- * stadeum's plans/software.md), and this one line.
+ * Who makes and changes workspaces, in this one line. The owner's rule
+ * (2026-11-23, stadeum's plans/software.md row 23): "anyone can make a
+ * workspace".
  *
- * - `"anyone"` (proposed): any person the Code app is shown to, and the
+ * - `"anyone"`: any person the Code app is shown to, and the
  *   job agent with the `workspace` tool, each as themselves. A repository
  *   goes in only when their own token reads it (its remote is asked as
  *   them), and whatever sets the workspace up runs as them, on their bill.
- * - `"admins"`: an admin, in the Code app, alone. The job agent's
- *   `workspace` tool is then refused: strut tells a step about an admin
- *   only on a page's call.
+ * - `"admins"`, kept as the way back: an admin, in the Code app, alone.
+ *   The job agent's `workspace` tool is then refused: strut tells a step
+ *   about an admin only on a page's call.
  */
 export const MAKERS: "anyone" | "admins" = "anyone";
 
@@ -491,7 +492,8 @@ export async function reach(ctx: Ctx): Promise<Reached> {
  * rule, stadeum's plans/software.md row 24): every repository picked on
  * GitHub, or, when an org granted all of its repositories, the five most
  * recently pushed. Named after their owner: the one most of them share.
- * None when nothing is reached.
+ * None when nothing is reached. It is only suggested: nothing is written
+ * until a person presses Set up (`setUpDefault`).
  */
 export function defaultWorkspace(reached: Reach[]): { name: string; repositories: string[] } | undefined {
   if (!reached.length) return undefined;
@@ -705,23 +707,30 @@ export async function deleteWorkspace(ctx: Ctx, raw: unknown) {
   return { deleted: name, left };
 }
 
+/** The default workspace the Code app suggests: only while the box has
+ *  no workspace, from what the viewer's forges reach. */
+export function suggestion(list: List, reached: Reached): { name: string; repositories: string[] } | undefined {
+  return list.workspaces.length ? undefined : defaultWorkspace(reached.repositories);
+}
+
 /**
- * `check`'s first step: when the box has no workspace, make the default
- * from what the forges reach, as the run's person (the check workflow's
- * owner). Nothing when the box has one, or nothing is reached. A box whose
- * people delete every workspace gets it again at the next check.
+ * Set up the suggested default workspace, as the person who pressed Set up
+ * (the owner's rule: "default waits for Set up"). Worked out again from
+ * what their own forges reach now, so it is theirs; a repository whose
+ * remote refuses them is left out. Refused once the box has a workspace:
+ * another is made with New workspace.
  */
-export async function makeDefault(ctx: Ctx) {
+export async function setUpDefault(ctx: Ctx) {
   const list = await readList(ctx);
-  if (list.workspaces.length) return { made: false, why: "the box has a workspace" };
+  if (list.workspaces.length) throw new Error("the box has a workspace already: make another with New workspace");
   const reached = await reach(ctx);
   const choice = defaultWorkspace(reached.repositories);
   if (!choice) {
     const why = reached.problem ?? reached.hosts.map((h) => (h.problem ? `${h.host}: ${h.problem}` : "")).filter(Boolean).join("; ");
-    return { made: false, why: `no forge reaches a repository as this run's person${why ? ` (${why})` : ""}` };
+    throw new Error(`your accounts reach no repository to set up${why ? ` (${why})` : ""}: make a workspace by address with New workspace`);
   }
   const made = await changeWorkspace(ctx, { name: choice.name, repositories: choice.repositories, create: true, skipRefused: true });
-  return { made: true, workspace: made.workspace, repositories: made.repositories, ...(made.skipped ? { skipped: made.skipped } : {}) };
+  return { workspace: made.workspace, repositories: made.repositories, ...(made.skipped ? { skipped: made.skipped } : {}) };
 }
 
 /** `check`'s pass: ask every remote, record a moved head (and branch), say

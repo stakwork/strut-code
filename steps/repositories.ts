@@ -1,5 +1,5 @@
 import { z, defineStep } from "strut";
-import { asCtx, mayChange, reach, readList, view } from "./_code.js";
+import { asCtx, mayChange, reach, readList, suggestion, view } from "./_code.js";
 
 export default defineStep({
   type: "stadeum/code/repositories",
@@ -11,6 +11,7 @@ export default defineStep({
     "a `problem` when its last check failed, and the `workspaces` it is in. " +
     "`reachable`: every repository the forges' tokens reach as you (strut's git/repositories), whether or not the box holds it, each with its `url`, `name`, " +
     "whether it is `private`, when it was `pushed` and its `description`; `hosts` says which forges were asked, and why one reached nothing. " +
+    "While the box has no workspace, `suggested` is the default one from what you reach, written only when a person presses Set up in the Code app. " +
     "Clone a repository by its `url`; work on its default `branch`. Make a workspace, or add to one, with stadeum_code_workspace.",
   effect: "read",
   input: z.object({
@@ -50,6 +51,10 @@ export default defineStep({
       .optional(),
     hosts: z.array(z.object({ host: z.string(), problem: z.string().optional() })).optional(),
     reach_problem: z.string().optional().describe("Why nothing could be asked of the forges"),
+    suggested: z
+      .object({ name: z.string(), repositories: z.array(z.string()) })
+      .optional()
+      .describe("While the box has no workspace: the default one, suggested, from what the forges reach. Nothing is written until a person presses Set up"),
     may: z.boolean().optional().describe("On a page's call: whether this viewer may make and change workspaces here."),
   }),
   async run(cfg, ctx) {
@@ -58,6 +63,7 @@ export default defineStep({
     return {
       ...view(list),
       ...(reached ? { reachable: reached.repositories, hosts: reached.hosts, ...(reached.problem ? { reach_problem: reached.problem } : {}) } : {}),
+      ...(reached && suggestion(list, reached) ? { suggested: suggestion(list, reached) } : {}),
       ...(c.app ? { may: mayChange(c) } : {}),
     };
   },

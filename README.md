@@ -21,12 +21,12 @@ secret.
 | `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
 | `concepts/Codebase.md` | The `Codebase` page, a root: short, and it stays as it is. Under it go a page for each workspace that has been baked, and later a page for each repository and each feature |
 | `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, and a link to its page once it is baked. **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
-| `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `default-workspace`, then `heads`, then `ingest` on each repository whose head is not ingested |
+| `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested. It writes no workspace |
 | `workflows/ingest.yaml` | Takes a repository in at its head. Today it only records the commit: a parser plugs in here, before `record` |
 | `steps/repositories.ts` | The job agent's tool and the app's read: the workspaces and their repositories, each workspace's page, and what the forges reach as the caller |
 | `steps/workspace.ts` | The job agent's tool and the app's New workspace and changes: make a workspace, or put repositories in one or take them out, as the caller |
 | `steps/rename.ts`, `delete.ts` | The app's Rename and Delete |
-| `steps/default-workspace.ts` | `check`'s first step: the box's default workspace, when it has none |
+| `steps/default-workspace.ts` | The suggested default workspace's **Set up**, a person's press in the Code app |
 | `steps/heads.ts` | `check`'s pass: strut's `git/remote-head` on each remote, four at a time, as the run's person |
 | `steps/record.ts` | `ingest`'s step: the head, recorded as ingested |
 | `strut.yaml` `job:` | The job agent's tools: `repositories` and `workspace`, and strut's own `git/push` and `git/pull-request` |
@@ -39,11 +39,11 @@ How it holds together:
   with the `workspace` tool, as the job's person. Each repository put in
   is asked for at its remote as that person first, so only one their own
   token reads goes in, and a refusal changes nothing. Whatever sets the
-  workspace up runs as them too. This is open question 20 of stadeum's
-  `plans/software.md`, the owner's to answer: `MAKERS` in `steps/_code.ts`
-  is one line, `"anyone"` or `"admins"` (an admin, in the Code app, alone;
-  the job agent's tool then refuses, as strut tells a step about an admin
-  only on a page's call).
+  workspace up runs as them too. The owner's rule (2026-11-23: *"anyone
+  can make a workspace"*). It is one line, `MAKERS` in `steps/_code.ts`:
+  `"anyone"` or `"admins"` (an admin, in the Code app, alone; the job
+  agent's tool then refuses, as strut tells a step about an admin only on
+  a page's call).
 - **Only the Code app, or no page.** Strut's app door names a page's app
   from the identity it signed for the page (`ctx.app.name`). Any app may
   list these steps among its grants, so a change from another app, or a
@@ -87,14 +87,17 @@ How it holds together:
   Deleting a workspace deletes its page and each of its repositories in no
   other. A workspace has no main repository: what runs it is its own setup,
   which the package that runs workspaces keeps on its node.
-- **The default workspace.** When the box has no workspace, `check` makes
-  one from what the forges reach as its owner: every repository picked on
-  GitHub (`picked`, which a forge sets on a repository granted one by one),
-  or the five most recently pushed when an org granted all of them, named
-  after their owner. A repository whose remote refuses is left out. A box
-  whose people delete every workspace gets it again at the next check.
-  Making it starts its setup like any other's, as `check`'s owner: open
-  question 21 of stadeum's `plans/software.md`, the owner's to answer.
+- **The default workspace waits for Set up** (the owner's rule,
+  2026-11-23). While the box has no workspace, `repositories` gives a
+  `suggested` one from what the viewer's forges reach: every repository
+  picked on GitHub (`picked`, which a forge sets on a repository granted
+  one by one), or the five most recently pushed when an org granted all
+  of them, named after their owner. The Code app shows it with a **Set
+  up** button, and nothing is written until someone presses it
+  (`default-workspace`). It is then worked out again from what their own
+  forges reach and written as them, so its setup runs as them; a
+  repository whose remote refuses them is left out. No setup job starts
+  unasked, and `check` writes no workspace.
 - **Making a workspace is all Code does.** Setting it up is the package's
   that runs workspaces (`stadeum/pods`, on strut's `on: created:
   Workspace`), and a new repository's webhook is its forge package's (`on:
@@ -202,11 +205,12 @@ pull request could be opened. This package names no forge.
   - New workspace, from what the viewer's forges reach or by address;
     add, take out, rename and delete on each workspace's card. Add a
     repository, Workspaces… and Make main are gone.
-  - Anyone makes workspaces, as themselves (`MAKERS`, open question 20).
+  - Anyone makes workspaces, as themselves (the owner's rule; `MAKERS`).
   - A workspace has no main repository. A repository is the box's while
     it is in a workspace.
-  - `check` makes the default workspace when the box has none (open
-    question 21).
+  - While the box has no workspace, the Code app suggests the default
+    one and writes it only when someone presses Set up (the owner's
+    rule).
   - The `workspace` job tool. `repositories` also lists what the forges
     reach.
   - `Code Change` opens the pull request with `git_pull_request`, picks
@@ -287,8 +291,9 @@ stand-in is scripted (strut's mock model) along the page's path: it lists
 the repositories, checks the private one out into the job's directory,
 edits and stages it, is refused its default branch, pushes a new branch
 with the person's own token, and opens the pull request through strut's
-`git/pull-request`. The default workspace is made at `check` from what
-the forges reach as its owner, and not when the box has one. A workspace
+`git/pull-request`. The default workspace is suggested from what the
+viewer's forges reach while the box has none, written only at Set up, as
+the person who pressed it, and never by `check`. A workspace
 is renamed in place (the same node, its page renamed) and deleted with
 its page and the repositories in no other; a workspace's page is written
 under `Codebase` as pods writes it at the bake.

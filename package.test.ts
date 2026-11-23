@@ -63,7 +63,7 @@ const OTHER: Record<string, string> = {
   "apps/console/app.yaml": [
     "title: Console",
     "grants:",
-    "  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/rename, stadeum/code/delete]",
+    "  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete]",
     "",
   ].join("\n"),
   "apps/console/src/App.tsx": "export default function App() { return <p>console</p>; }\n",
@@ -629,7 +629,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
 
     const r = await strut.run("stadeum/code/check", {}, { actor: "root", principal: "root" });
     assert.equal(r.status, "success", JSON.stringify(r.error));
-    assert.deepEqual((await list()).workspaces.map((w) => w.name), ["code", "strut"], "the box has workspaces: no default");
+    assert.deepEqual((await list()).workspaces.map((w) => w.name), ["code", "strut"], "check writes no workspace");
     const after = await repo(CODE);
     assert.equal(after.head, before.head, "the remote's head, recorded");
     assert.equal(after.ingested, after.head, "and ingested");
@@ -682,24 +682,37 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "strut" })).result, { deleted: "strut", left: [CODE] });
   });
 
-  it("makes the default workspace at check when the box has none, from what the forges reach as the check's owner", async () => {
+  it("suggests the default workspace while the box has none, and writes it only when a person presses Set up, as them", async () => {
     assert.deepEqual((await list()).workspaces, []);
-    // root owns check, and has connected nothing for the lab: none made.
-    let ran = await fireCheck();
+    // root has connected nothing for the lab: nothing to suggest, nothing to set up.
+    const root = page("root", true);
+    assert.equal((await root("stadeum/code/repositories")).result.suggested, undefined);
+    assert.match((await root("stadeum/code/default-workspace")).error ?? "", /your accounts reach no repository to set up/);
+    // root connects: every repository picked there, named after their owner, suggested.
+    await ownSecret("root", "LAB_TOKEN", TOKEN);
+    const seen = (await root("stadeum/code/repositories")).result;
+    assert.deepEqual(seen.suggested, { name: "team", repositories: [OTHER_SECRET, SECRET] });
+    assert.deepEqual(seen.workspaces, [], "suggested, not written");
+    // check writes nothing: no setup starts unasked.
+    const ran = await fireCheck();
     assert.equal(ran.status, "success", JSON.stringify(ran.error));
     assert.equal(ran.principal, "root");
     assert.deepEqual((await list()).workspaces, []);
-    // root connects: every repository picked there, named after their owner.
-    await ownSecret("root", "LAB_TOKEN", TOKEN);
-    ran = await fireCheck();
-    assert.equal(ran.status, "success", JSON.stringify(ran.error));
+    // Set up from another app, or by a run that is nobody's: refused.
+    assert.match((await page("root", true, OTHER_APP)("stadeum/code/default-workspace")).error ?? "", /made and changed in the Code app/);
+    // root presses Set up: written as root.
+    const out = await root("stadeum/code/default-workspace");
+    assert.equal(out.error, undefined, out.error);
+    assert.deepEqual(out.result, { workspace: "team", repositories: [OTHER_SECRET, SECRET] });
     assert.deepEqual(await space("team"), { name: "team", repositories: [OTHER_SECRET, SECRET] });
+    assert.equal((await repo(SECRET)).branch, "trunk", "the remote's own default branch");
+    // Once the box has one, nothing is suggested, and Set up is refused.
+    assert.equal((await root("stadeum/code/repositories")).result.suggested, undefined);
+    assert.match((await root("stadeum/code/default-workspace")).error ?? "", /the box has a workspace already/);
+    // The next check ingests what is new.
+    assert.equal((await fireCheck()).status, "success");
     const r = await repo(SECRET);
-    assert.equal(r.branch, "trunk", "the remote's own default branch");
-    assert.equal(r.ingested, r.head, "ingested in the same check");
-    // Once the box has one, no other.
-    ran = await fireCheck();
-    assert.deepEqual((await list()).workspaces.map((w) => w.name), ["team"]);
+    assert.equal(r.ingested, r.head);
   });
 
   it("lists what a person's forges reach, picked or not, written one way, as them", async () => {

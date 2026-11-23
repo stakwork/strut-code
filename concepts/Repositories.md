@@ -10,11 +10,11 @@ or by address. A job agent reads them with the `repositories` tool
 `workspace` tool (`stadeum_code_workspace`).
 
 A repository is the box's while it is in a workspace. One taken out of
-the last workspace it was in leaves the box. When the box has no
-workspace, the `check` workflow makes the default one from what the
-forges reach as its owner: every repository picked on GitHub, or the
-five most recently pushed when an org granted all of its repositories,
-named after their owner.
+the last workspace it was in leaves the box. While the box has no
+workspace, the Code app suggests a default one from what the viewer's
+forges reach: every repository picked on GitHub, or the five most
+recently pushed when an org granted all of its repositories, named after
+their owner. It is written only when someone presses Set up, as them.
 
 Every 15 minutes `check` asks each repository's remote for the head of
 its default branch (as `git ls-remote <url> HEAD` does) and records a

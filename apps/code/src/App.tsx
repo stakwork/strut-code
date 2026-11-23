@@ -28,6 +28,7 @@ const LIST = "stadeum/code/repositories";
 const WORKSPACE = "stadeum/code/workspace";
 const RENAME = "stadeum/code/rename";
 const DELETE = "stadeum/code/delete";
+const DEFAULT = "stadeum/code/default-workspace";
 /** Strut's Knowledge app, which opens a node by its ref_id (`node`). */
 const KNOWLEDGE = "strut/knowledge";
 
@@ -59,6 +60,8 @@ interface List {
   reachable?: Reach[];
   hosts?: Array<{ host: string; problem?: string }>;
   reach_problem?: string;
+  /** While the box has no workspace: the default, suggested, written only at Set up. */
+  suggested?: { name: string; repositories: string[] };
   /** Whether this viewer may make and change workspaces: strut's app door says who they are. */
   may?: boolean;
 }
@@ -99,6 +102,12 @@ export default function App() {
 
   const data = list.data;
   const may = data?.may === true;
+  // While the box has no workspace: the default one, suggested from what the
+  // viewer's forges reach, and written only when they press Set up.
+  const empty = !!data && !data.workspaces.length;
+  const reach = useQuery({ queryKey: ["code", "reach"], queryFn: () => client.run<List>(LIST, { reachable: true }), enabled: empty && may, staleTime: 60_000 });
+  const suggested = empty ? reach.data?.suggested : undefined;
+  const reachName = new Map((reach.data?.reachable ?? []).map((r) => [r.url, r.name]));
   // Opened with an address: New workspace, with it filled in (./input.ts).
   const given = addressToAdd(input, may);
   useEffect(() => {
@@ -154,10 +163,30 @@ export default function App() {
         </Alert>
       )}
       {list.isLoading && <p className="text-sm text-muted-foreground">Reading the workspaces…</p>}
-      {data && !data.workspaces.length && (
+      {data && !data.workspaces.length && !suggested && (
         <p className="text-sm text-muted-foreground">
           No workspaces yet.{may ? " Make one from the repositories you work on together." : ""}
         </p>
+      )}
+
+      {suggested && (
+        <Card className="gap-2 border-dashed py-4">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
+            <div className="flex items-center gap-2">
+              <CardTitle className="font-mono text-base">{suggested.name}</CardTitle>
+              <Badge variant="outline">suggested</Badge>
+            </div>
+            <Button size="sm" disabled={busy} onClick={() => void act(() => client.run(DEFAULT, {}))}>
+              {busy ? "Working…" : "Set up"}
+            </Button>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-1 px-4">
+            <p className="text-sm">{suggested.repositories.map((u) => reachName.get(u) ?? tail(u)).join(" · ")}</p>
+            <p className="text-xs text-muted-foreground">
+              The repositories your accounts reach that were picked for the box, or the five pushed to most recently. Nothing is made until you press Set up; then Jamie sets it up and bakes it, as you, in a job you can watch.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {data?.workspaces.map((w) => (

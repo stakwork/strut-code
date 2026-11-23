@@ -4,10 +4,12 @@ icon: folder-git-2
 entry: src/App.tsx
 grants:
   workflows: []
-  # `repositories` reads the workspaces and what the viewer's forges reach;
-  # `workspace` makes one or changes its repositories, `rename` and `delete`
-  # the rest. Each change is the viewer's own, refused to a call that is
-  # nobody's (steps/_code.ts `MAKERS`).
-  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/rename, stadeum/code/delete]
+  # `repositories` reads the workspaces and what the viewer's forges reach,
+  # with the suggested default while the box has none; `workspace` makes
+  # one or changes its repositories, `default-workspace` is the suggested
+  # one's Set up, `rename` and `delete` the rest. Each change is the
+  # viewer's own, refused to a call that is nobody's (steps/_code.ts
+  # `MAKERS`).
+  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete]
   sqlite: false
   automations: []

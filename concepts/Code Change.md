@@ -95,7 +95,9 @@ request is open, read its checks with your tool for the repository's host
 (`github_pr_status` for github.com):
 
 - Still running when you're done: say so, with the link. Don't wait on
-  them; the person can ask you to look again.
+  them; the person can ask you to look again. If they fail later, strut
+  sends you one turn to fix them ("Strut sent this when the checks
+  finished"), and its end reaches the person.
 - Failed: it's yours. Read why (`logs: true`), fix it on the same branch,
   push, and say what failed and what you changed.
 - Passed: say what they ran. The change is tested only by what you saw

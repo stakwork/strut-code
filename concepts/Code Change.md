@@ -67,7 +67,7 @@ crate of a Node app) goes in the workspace's image, not this job's shell:
 job has it.
 
 No pod (no `stadeum_pods_claim` among your tools, or the claim fails), or
-an app a pod doesn't run (a phone app; a platform or an architecture the
+an app a pod can't run (a phone app; a platform or an architecture the
 pod lacks): make the change in a checkout as in 3. Build no platform for
 it here. Say plainly in `text` what wasn't run and why. The pull
 request's checks (6) are then what runs it.

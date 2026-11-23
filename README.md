@@ -171,7 +171,7 @@ forge's, granted by that forge's package; this one names none.
 - **0.6.1** `Code Change` §4 says what a pod is for:
   - A tool the build needs that the pod can run goes in the workspace's
     image (`.pod/`'s `Dockerfile`, then bake), not one job's shell.
-  - An app a pod doesn't run (a phone app; a platform or an architecture
+  - An app a pod can't run (a phone app; a platform or an architecture
     it lacks) is changed in a checkout, and the pull request's checks run
     it.
   

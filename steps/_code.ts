@@ -1,7 +1,8 @@
 /**
  * What every step of stadeum/code shares: the graph, through strut's own
- * `graph/*` steps; an address, checked; a remote, asked for its head; and
- * the list, as the graph holds it.
+ * `graph/*` steps; an address, checked; a remote, asked for its head; what
+ * the forges reach, through strut's `git/repositories`; and the workspaces
+ * and their repositories, as the graph holds them.
  *
  * The contract (the two types' fields and the link between them) is the
  * Repositories page, `concepts/Repositories.md`. Another package reads these
@@ -16,10 +17,13 @@ export const INCLUDES = "INCLUDES";
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 
 /** A workspace's page: the Concept `<workspace> workspace`, which
- *  stadeum/pods writes at the bake. Not the bare name: that is its main
+ *  stadeum/pods writes at the bake. Not the bare name: that is a
  *  repository's page. */
 export const CONCEPT = "Concept";
 export const pageName = (workspace: string) => `${workspace} workspace`;
+
+/** The most repositories one call puts in a workspace. */
+export const MOST = 50;
 
 interface StepDef {
   input: { parse(v: unknown): unknown };
@@ -33,8 +37,9 @@ export interface Ctx {
    *  page) and `admin` when its viewer is an admin. */
   app?: { name: string; version?: string; admin?: boolean };
   registry?: Record<string, StepDef | undefined>;
-  /** Whom the run is as: the person who launched it (an admin's Add), else
-   *  its workflow's owner (`check`'s schedule). Their secrets are the run's. */
+  /** Whom the run is as: the person who launched it (a page's viewer, a
+   *  job's person), else its workflow's owner (`check`'s schedule). Their
+   *  secrets are the run's. */
   actor?: string;
   principal?: string;
   /** Set when the run is a fire of an automation: `check`'s schedule. */
@@ -42,6 +47,8 @@ export interface Ctx {
 }
 
 export const asCtx = (ctx: unknown): Ctx => ctx as Ctx;
+
+const person = (ctx: Ctx): string | undefined => ctx.principal ?? ctx.actor;
 
 // ── the graph ─────────────────────────────────────────────────────────────
 
@@ -95,11 +102,12 @@ export interface Repo {
 export interface Space {
   ref_id: string;
   name: string;
-  main?: string;
-  /** Its repositories' addresses, the main one first, then by name. */
+  /** Its repositories' addresses, by name. */
   repositories: string[];
   /** Its page, when it has been baked: the Concept `<name> workspace`. */
   page?: { name: string; ref_id: string };
+  /** It still carries `main`, which 0.6 and before wrote: `check` clears it. */
+  oldMain?: true;
 }
 
 export interface List {
@@ -123,7 +131,7 @@ const chunks = <T>(xs: T[], size: number): T[][] => {
   return out;
 };
 
-/** The list as the graph holds it now. */
+/** The workspaces and their repositories as the graph holds them now. */
 export async function readList(ctx: Ctx): Promise<List> {
   const [repoNodes, spaceNodes] = await Promise.all([all(ctx, REPOSITORY), all(ctx, WORKSPACE)]);
   const repos = repoNodes.map(toRepo).filter((r) => r.url);
@@ -141,14 +149,19 @@ export async function readList(ctx: Ctx): Promise<List> {
     }
   }
   const nameOf = new Map(repos.map((r) => [r.url, r.name]));
+  const byName = (a: string, b: string) => (nameOf.get(a) ?? a).localeCompare(nameOf.get(b) ?? b) || a.localeCompare(b);
   const pages = await pagesOf(ctx, spaceNodes.map((n) => text(n.properties["name"])).filter((s): s is string => !!s));
   const workspaces = spaceNodes
     .map((n): Space => {
       const name = text(n.properties["name"]) ?? "";
-      const main = text(n.properties["main"]);
-      const urls = [...(members.get(n.ref_id) ?? [])].sort((a, b) => (a === main ? -1 : b === main ? 1 : (nameOf.get(a) ?? a).localeCompare(nameOf.get(b) ?? b) || a.localeCompare(b)));
       const page = pages.get(pageName(name));
-      return { ref_id: n.ref_id, name, ...(main ? { main } : {}), repositories: urls, ...(page ? { page: { name: pageName(name), ref_id: page } } : {}) };
+      return {
+        ref_id: n.ref_id,
+        name,
+        repositories: [...(members.get(n.ref_id) ?? [])].sort(byName),
+        ...(page ? { page: { name: pageName(name), ref_id: page } } : {}),
+        ...(text(n.properties["main"]) ? { oldMain: true as const } : {}),
+      };
     })
     .filter((w) => w.name)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -181,38 +194,55 @@ export async function findRepository(ctx: Ctx, url: string): Promise<Repo | unde
 export function view(list: List) {
   return {
     repositories: list.repositories.map(({ ref_id: _ref, ...r }) => ({ ...r, workspaces: list.workspaces.filter((w) => w.repositories.includes(r.url)).map((w) => w.name) })),
-    workspaces: list.workspaces.map(({ ref_id: _ref, ...w }) => w),
+    workspaces: list.workspaces.map(({ ref_id: _ref, oldMain: _main, ...w }) => w),
   };
 }
 
-// ── who may change it ─────────────────────────────────────────────────────
+// ── who may make and change workspaces ────────────────────────────────────
 
-/** The package's own app, where the list is changed. */
+/** The package's own app, where people make and change workspaces. */
 export const CODE_APP = "stadeum/code/code";
 
 /**
- * May this call change the list? Only an admin's call from this package's
- * own Code app, or a run that page launched. Strut's app door names the app
- * from the identity it signed for the page (`ctx.app.name`), and no other
- * app may take a name under an installed package's prefix; it says whether
- * the viewer is an admin (`ctx.app.admin`). Any other app an admin opens may
- * list these steps among its grants, so an admin's call from it changes
- * nothing, as strut gives a package's admin scope to its own app alone
- * (stakwork/strut#789). A builder's preview of the app is not the app.
+ * Who makes and changes workspaces: the owner's call (open question 20 of
+ * stadeum's plans/software.md), and this one line.
+ *
+ * - `"anyone"` (proposed): any person the Code app is shown to, and the
+ *   job agent with the `workspace` tool, each as themselves. A repository
+ *   goes in only when their own token reads it (its remote is asked as
+ *   them), and whatever sets the workspace up runs as them, on their bill.
+ * - `"admins"`: an admin, in the Code app, alone. The job agent's
+ *   `workspace` tool is then refused: strut tells a step about an admin
+ *   only on a page's call.
  */
-export function mayChange(ctx: Ctx): boolean {
+export const MAKERS: "anyone" | "admins" = "anyone";
+
+/**
+ * Why this call may not make or change a workspace, or none when it may.
+ *
+ * A page's call must be this package's own Code app: strut's app door names
+ * the app from the identity it signed for the page (`ctx.app.name`), and no
+ * other app may take a name under an installed package's prefix. Any app
+ * may list these steps among its grants, so a call from another app, or a
+ * builder's preview of this one, changes nothing. A call with no page (the
+ * job agent's tool, a workflow) changes them as its person, and a run that
+ * is nobody's changes nothing.
+ */
+export function refusal(ctx: Ctx, makers: "anyone" | "admins" = MAKERS): string | undefined {
   const app = ctx.app;
-  return app?.admin === true && app.name === CODE_APP && !app.version?.startsWith("preview-");
+  if (app && (app.name !== CODE_APP || app.version?.startsWith("preview-"))) {
+    return `workspaces are made and changed in the Code app (${CODE_APP}), not from ${app.name === CODE_APP ? "a preview of it" : app.name}`;
+  }
+  if (makers === "admins" && app?.admin !== true) return "only an admin makes and changes workspaces, in the Code app";
+  if (!person(ctx)) return "a workspace is made as a person, with their own access to its repositories, and this run is nobody's";
+  return undefined;
 }
 
-export function requireAdmin(ctx: Ctx): void {
-  if (mayChange(ctx)) return;
-  const app = ctx.app;
-  if (app?.admin === true) {
-    const from = app.name === CODE_APP ? "a preview of it" : app.name;
-    throw new Error(`the box's repositories are changed in the Code app (${CODE_APP}), not from ${from}`);
-  }
-  throw new Error("only an admin changes the box's repositories, in the Code app");
+export const mayChange = (ctx: Ctx): boolean => refusal(ctx) === undefined;
+
+export function requireMaker(ctx: Ctx): void {
+  const why = refusal(ctx);
+  if (why) throw new Error(why);
 }
 
 // ── an address ────────────────────────────────────────────────────────────
@@ -262,22 +292,14 @@ export function workspaceName(raw: unknown): string {
   return name;
 }
 
-/** The names a repository's own workspace may take, in order: its name,
- *  then its owner's and its name, then its name numbered. */
-export function workspaceNames(a: Address): string[] {
-  const slug = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^[^a-z0-9]+/, "")
-      .slice(0, 63)
-      .replace(/[._-]+$/, "");
-  const base = slug(a.name) || "repository";
-  const owner = slug(`${a.owner.split("/").pop() ?? ""}-${a.name}`);
-  const out = [base, ...(owner && owner !== base ? [owner] : [])];
-  for (let i = 2; i < 100; i++) out.push(`${base.slice(0, 60)}-${i}`);
-  return out;
-}
+/** Any text made into a workspace's name, or none. */
+export const slug = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+/, "")
+    .slice(0, 63)
+    .replace(/[._-]+$/, "");
 
 // ── a remote ──────────────────────────────────────────────────────────────
 
@@ -316,8 +338,9 @@ export async function askRemote(ctx: Ctx, url: string, as: () => Promise<Asker> 
 }
 
 /** Whom a remote is asked as, said to whoever reads why it failed: `you`
- *  on an admin's own Add, else the person by name (`check`'s schedule runs
- *  as its workflow's owner, never as whoever looks at the app). */
+ *  on a person's own call from the Code app, else the person by name
+ *  (`check`'s schedule runs as its workflow's owner, never as whoever looks
+ *  at the app; a job runs as its person). */
 export interface Asker {
   you?: true;
   /** The person, as `people/names` names them, with their actor. */
@@ -326,11 +349,11 @@ export interface Asker {
   scheduled?: true;
 }
 
-/** Whom this run asks as: `you` on an admin's call from the Code app,
+/** Whom this run asks as: `you` on a person's call from the Code app,
  *  otherwise the run's person, named. */
 export async function asker(ctx: Ctx): Promise<Asker> {
-  if (mayChange(ctx)) return { you: true };
-  const actor = ctx.principal ?? ctx.actor;
+  if (ctx.app && mayChange(ctx)) return { you: true };
+  const actor = person(ctx);
   const scheduled = ctx.automation ? { scheduled: true as const } : {};
   if (!actor) return scheduled;
   let name: string | undefined;
@@ -356,7 +379,7 @@ export function remoteProblem(url: string, message: string, as: Asker = {}): str
   switch (kind) {
     case "denied": {
       const lead = `${url} asks for a sign-in: it is private, or there is no repository there`;
-      if (as.you) return `${lead}, and you have no access to it: you have not connected an account for ${host}, or that account cannot read it. Connect one that can, then add it again.`;
+      if (as.you) return `${lead}, and you have no access to it: you have not connected an account for ${host}, or that account cannot read it. Connect one that can, then try again.`;
       const who = as.who ?? "nobody";
       const fix = as.scheduled ? ` Either ${who} connects one that can, or an admin gives the check workflow an owner whose account can.` : "";
       return `${lead}, and ${owner} has no access to it: ${who} has not connected an account for ${host}, or that account cannot read it.${fix}`;
@@ -373,160 +396,364 @@ export function remoteProblem(url: string, message: string, as: Asker = {}): str
   }
 }
 
-// ── changing the list ─────────────────────────────────────────────────────
+/** Ask several remotes, four at a time; each answer or why not, in order. */
+async function askAll(ctx: Ctx, urls: string[]): Promise<Array<Remote | Error>> {
+  let named: Promise<Asker> | undefined;
+  const as = () => (named ??= asker(ctx));
+  const out: Array<Remote | Error> = new Array(urls.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, urls.length) }, async () => {
+      for (let i = next++; i < urls.length; i = next++) {
+        out[i] = await askRemote(ctx, urls[i]!, as).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+      }
+    }),
+  );
+  return out;
+}
+
+// ── what the forges reach ─────────────────────────────────────────────────
+
+/** One repository a forge's token reaches, as strut's `git/repositories`
+ *  answers it, its address written as this package writes one. */
+export interface Reach {
+  url: string;
+  name: string;
+  private?: boolean;
+  /** When it was last pushed to, ISO 8601. */
+  pushed?: string;
+  description?: string;
+  /** Granted one by one, not with all of its owner's: on GitHub, picked
+   *  for an installation of selected repositories. */
+  picked?: boolean;
+}
+
+export interface Reached {
+  repositories: Reach[];
+  /** Each forge's host, and why it reached nothing when it didn't: the
+   *  person has not connected an account for it, say. */
+  hosts: Array<{ host: string; problem?: string }>;
+  /** Why nothing could be asked at all. */
+  problem?: string;
+}
+
+/** strut's step that asks each forge's package what the run's person's
+ *  token reaches (stakwork/strut#851, `plans/package-seams.md` §4). */
+const GIT_REPOSITORIES = "git/repositories";
+
+/**
+ * What every forge reaches, as the run's person: strut's `git/repositories`
+ * asks each forge package's `repositories` step, picked by its
+ * `provides.git` entry, with that person's own token. This package names no
+ * forge. A strut without the step reaches nothing, and says so.
+ */
+export async function reach(ctx: Ctx): Promise<Reached> {
+  const def = ctx.registry?.[GIT_REPOSITORIES];
+  if (!def) return { repositories: [], hosts: [], problem: `this strut lists no forge's repositories: that needs strut's ${GIT_REPOSITORIES} step (stakwork/strut#851). A repository can still be added by its address` };
+  let out: unknown;
+  try {
+    out = await def.run(def.input.parse({}), ctx);
+  } catch (e) {
+    out = e instanceof Error ? e.message : String(e);
+  }
+  if (typeof out === "string") return { repositories: [], hosts: [], problem: `the forges' repositories could not be listed: ${out}` };
+  const body = (out ?? {}) as { repositories?: unknown; hosts?: unknown };
+  const seen = new Map<string, Reach>();
+  for (const raw of Array.isArray(body.repositories) ? body.repositories : []) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    let a: Address;
+    try {
+      a = address(r["url"]);
+    } catch {
+      continue;
+    }
+    if (seen.has(a.url)) continue;
+    const said = text(r["description"])?.replace(/\s+/g, " ").trim().slice(0, 200);
+    seen.set(a.url, {
+      url: a.url,
+      name: text(r["name"]) ?? a.name,
+      ...(typeof r["private"] === "boolean" ? { private: r["private"] } : {}),
+      ...(text(r["pushed"]) && !Number.isNaN(Date.parse(r["pushed"] as string)) ? { pushed: r["pushed"] as string } : {}),
+      ...(said ? { description: said } : {}),
+      ...(r["picked"] === true ? { picked: true } : {}),
+    });
+  }
+  const hosts = (Array.isArray(body.hosts) ? body.hosts : [])
+    .map((h) => (h ?? {}) as { host?: unknown; problem?: unknown })
+    .filter((h): h is { host: string; problem?: unknown } => typeof h.host === "string" && !!h.host)
+    .map((h) => ({ host: h.host, ...(text(h.problem) ? { problem: text(h.problem)! } : {}) }));
+  const repositories = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name) || a.url.localeCompare(b.url));
+  return { repositories, hosts };
+}
+
+/**
+ * The box's default workspace, from what the forges reach (the owner's
+ * rule, stadeum's plans/software.md row 24): every repository picked on
+ * GitHub, or, when an org granted all of its repositories, the five most
+ * recently pushed. Named after their owner: the one most of them share.
+ * None when nothing is reached.
+ */
+export function defaultWorkspace(reached: Reach[]): { name: string; repositories: string[] } | undefined {
+  if (!reached.length) return undefined;
+  const picked = reached.filter((r) => r.picked);
+  const when = (r: Reach) => (r.pushed ? Date.parse(r.pushed) : 0);
+  const chosen = picked.length ? picked : [...reached].sort((a, b) => when(b) - when(a) || a.name.localeCompare(b.name)).slice(0, 5);
+  // A forge's owners may ignore case (GitHub's do): Stakwork is stakwork.
+  const owners = new Map<string, number>();
+  for (const r of chosen) {
+    const owner = slug(address(r.url).owner.split("/").pop() ?? "");
+    owners.set(owner, (owners.get(owner) ?? 0) + 1);
+  }
+  const owner = [...owners].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? "";
+  return { name: slug(owner) || "default", repositories: chosen.slice(0, MOST).map((r) => r.url).sort() };
+}
+
+// ── changing the workspaces ───────────────────────────────────────────────
 
 const now = () => new Date().toISOString();
 
-export const link = (ctx: Ctx, space: string, repo: string) => graph(ctx, "create-triplet", { source_ref_id: space, target_ref_id: repo, edge_type: INCLUDES });
-export const unlink = (ctx: Ctx, space: string, repo: string) => graph(ctx, "delete-edge", { source_ref_id: space, edge_type: INCLUDES, target_ref_id: repo });
+const link = (ctx: Ctx, space: string, repo: string) => graph(ctx, "create-triplet", { source_ref_id: space, target_ref_id: repo, edge_type: INCLUDES });
+const unlink = (ctx: Ctx, space: string, repo: string) => graph(ctx, "delete-edge", { source_ref_id: space, edge_type: INCLUDES, target_ref_id: repo });
 
-/** A new Workspace, or why there is none: a name strut's graph keys as it
- *  keys another (graph keys drop punctuation and case). */
-async function newWorkspace(ctx: Ctx, name: string, main: string): Promise<Written> {
-  return graph<Written>(ctx, "create-node", { node_type: WORKSPACE, node_data: { name, main } });
-}
-
-/** Take `url` out of a workspace: a workspace left empty goes, and its
- *  page with it; one whose main it was takes its next repository as main. */
-async function leave(ctx: Ctx, space: Space, repo: Repo): Promise<"left" | "deleted"> {
-  const rest = space.repositories.filter((u) => u !== repo.url);
-  // The page first: a refusal leaves the workspace and its page as they were.
-  if (!rest.length && space.page) await graph(ctx, "delete-node", { ref_id: space.page.ref_id, reason: `its workspace, ${space.name}, went with its last repository, ${repo.url}` });
-  await unlink(ctx, space.ref_id, repo.ref_id);
-  if (!rest.length) {
-    await graph(ctx, "delete-node", { ref_id: space.ref_id, reason: `its last repository, ${repo.url}, left it` });
-    return "deleted";
+/** A workspace's INCLUDES edges, as the graph holds them: a node restored
+ *  from a soft delete may bring old ones back. */
+async function membersOf(ctx: Ctx, ref_id: string, repos: Repo[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const byRef = new Map(repos.map((r) => [r.ref_id, r.url]));
+  for (const among of chunks([...byRef.keys()], 5000)) {
+    const { edges } = await graph<{ edges: Array<{ source: string; target: string; edge_type: string }> }>(ctx, "graph-edges", { ref_ids: [ref_id], among });
+    for (const e of edges) if (e.edge_type === INCLUDES && e.source === ref_id && byRef.has(e.target)) out.add(byRef.get(e.target)!);
   }
-  if (space.main === repo.url || !space.main) await graph(ctx, "edit-node", { ref_id: space.ref_id, node_data: { main: rest[0] } });
-  return "left";
+  return out;
 }
 
-/** Add a repository by its address: one node however often it is added,
- *  and, when it is new, a workspace of its own named after it. */
-export async function addRepository(ctx: Ctx, raw: unknown) {
-  const a = address(raw);
-  const list = await readList(ctx);
-  const known = list.repositories.find((r) => r.url === a.url);
-  const inSpaces = (url: string) => list.workspaces.filter((w) => w.repositories.includes(url)).map((w) => w.name);
-  if (known) return { url: known.url, name: known.name, branch: known.branch, head: known.head, created: false, workspaces: inSpaces(known.url) };
-
-  const remote = await askRemote(ctx, a.url);
+/** A new Repository node for an address its remote answered, or why there
+ *  is none: an address strut's graph keys as it keys another (graph keys
+ *  drop punctuation and case). One removed before comes back as new. */
+async function newRepository(ctx: Ctx, a: Address, remote: Remote, list: List): Promise<Repo> {
   const fields = { url: a.url, name: a.name, branch: remote.branch, head: remote.head, checked: now() };
   const made = await graph<Written>(ctx, "create-node", { node_type: REPOSITORY, node_data: fields });
   if (made.status === "Warning") {
     const other = list.repositories.find((r) => r.ref_id === made.ref_id);
     throw new Error(`${a.url} can't be listed beside ${other?.url ?? "a repository already in the graph"}: strut's graph keys the two addresses alike (its keys drop punctuation and case)`);
   }
-  // A repository removed before and added again comes back as it was: start it over.
   if (made.messages?.some((m) => /restored/i.test(m))) {
     await graph(ctx, "edit-node", { ref_id: made.ref_id, node_data: fields });
     const back = await findRepository(ctx, a.url);
     const stale = (["ingested", "problem"] as const).filter((k) => back?.[k]);
     if (stale.length) await graph(ctx, "edit-node", { ref_id: made.ref_id, properties_to_be_deleted: stale });
   }
-
-  const taken = new Set(list.workspaces.map((w) => w.name));
-  for (const name of workspaceNames(a)) {
-    if (taken.has(name)) continue;
-    const space = await newWorkspace(ctx, name, a.url);
-    if (space.status === "Warning") continue;
-    await link(ctx, space.ref_id, made.ref_id);
-    return { ...fields, created: true, workspaces: [name] };
-  }
-  throw new Error(`${a.url} is listed, but no name was free for a workspace of its own: put it in one with Workspaces`);
+  return { ref_id: made.ref_id, ...fields };
 }
 
-/** Remove a repository: out of every workspace, then off the list. */
-export async function removeRepository(ctx: Ctx, url: string) {
-  const list = await readList(ctx);
-  const repo = list.repositories.find((r) => r.url === url);
-  if (!repo) throw new Error(`${url} is not one of the box's repositories`);
-  const deleted: string[] = [];
-  const left: string[] = [];
-  for (const space of list.workspaces.filter((w) => w.repositories.includes(url))) {
-    ((await leave(ctx, space, repo)) === "deleted" ? deleted : left).push(space.name);
-  }
-  await graph(ctx, "delete-node", { ref_id: repo.ref_id, reason: "removed from the box's repositories" });
-  return { removed: url, left, deleted };
-}
-
-/** Put a repository in exactly these workspaces: a new name makes a
- *  workspace with it as main; a workspace it leaves empty goes. */
-export async function placeRepository(ctx: Ctx, url: string, names: unknown[]) {
-  const wanted = [...new Set(names.map(workspaceName))];
-  if (!wanted.length) throw new Error("a repository is in one workspace at least: to take it off the list, remove it");
-  const list = await readList(ctx);
-  const repo = list.repositories.find((r) => r.url === url);
-  if (!repo) throw new Error(`${url} is not one of the box's repositories`);
-  const made: string[] = [];
-  for (const name of wanted) {
-    const space = list.workspaces.find((w) => w.name === name);
-    if (space?.repositories.includes(url)) continue;
-    if (space) {
-      await link(ctx, space.ref_id, repo.ref_id);
-      continue;
+/** Take repositories out of a workspace, and off the box when it was the
+ *  last workspace they were in. The urls that left the box. */
+async function takeOut(ctx: Ctx, list: List, space: Space, urls: string[]): Promise<string[]> {
+  const gone: string[] = [];
+  for (const url of urls) {
+    const repo = list.repositories.find((r) => r.url === url);
+    if (!repo) continue;
+    await unlink(ctx, space.ref_id, repo.ref_id);
+    const elsewhere = list.workspaces.some((w) => w.ref_id !== space.ref_id && w.repositories.includes(url));
+    if (!elsewhere) {
+      await graph(ctx, "delete-node", { ref_id: repo.ref_id, reason: `it left ${space.name}, the last workspace it was in` });
+      gone.push(url);
     }
-    const fresh = await newWorkspace(ctx, name, url);
-    if (fresh.status === "Warning") {
-      const other = list.workspaces.find((w) => w.ref_id === fresh.ref_id);
+  }
+  return gone;
+}
+
+export interface Change {
+  /** The workspace's name. */
+  name: string;
+  /** Repositories to put in it, by https address. */
+  repositories?: unknown[];
+  /** Repositories to take out of it. */
+  remove?: unknown[];
+  /** Only make it: refuse when a workspace has this name. */
+  create?: boolean;
+  /** A repository its person's token can't read is left out, not refused
+   *  (the default workspace, from what a forge said it reaches). */
+  skipRefused?: boolean;
+}
+
+/**
+ * Make a workspace, or change which repositories it holds, as the run's
+ * person. Each repository put in is asked for at its remote as that
+ * person, so only one their own token reads goes in; a refusal changes
+ * nothing. One new to the box becomes a Repository node. One taken out of
+ * its last workspace leaves the box. A workspace keeps one repository at
+ * least: emptying it is deleting it.
+ */
+export async function changeWorkspace(ctx: Ctx, change: Change) {
+  const name = workspaceName(change.name);
+  const put = [...new Map((change.repositories ?? []).map((u) => address(u)).map((a) => [a.url, a])).values()];
+  const out = [...new Set((change.remove ?? []).map((u) => address(u).url))];
+  if (put.length > MOST) throw new Error(`at most ${MOST} repositories go in a workspace at once`);
+  const both = put.filter((a) => out.includes(a.url));
+  if (both.length) throw new Error(`${both[0]!.url} is both put in and taken out: say one`);
+
+  const list = await readList(ctx);
+  const space = list.workspaces.find((w) => w.name === name);
+  if (space && change.create) throw new Error(`there is a workspace ${name} already: pick another name, or add to it`);
+  if (!space && out.length) throw new Error(`there is no workspace ${name} to take repositories out of`);
+  if (!space && !put.length) throw new Error(`a workspace holds one repository at least: name one to make ${name} with`);
+  const holds = new Set(space?.repositories ?? []);
+  const adding = put.filter((a) => !holds.has(a.url));
+  const removing = out.filter((u) => holds.has(u));
+  const unknown = out.filter((u) => !holds.has(u));
+  if (unknown.length) throw new Error(`${unknown[0]} is not in ${name}`);
+  if (space && holds.size + adding.length - removing.length < 1) throw new Error(`${name} would hold no repository: delete it instead, in the Code app`);
+
+  // Every remote first, as the run's person: a refusal changes nothing.
+  const answers = await askAll(ctx, adding.map((a) => a.url));
+  const skipped: Array<{ url: string; problem: string }> = [];
+  const asked: Array<{ a: Address; remote: Remote }> = [];
+  for (const [i, a] of adding.entries()) {
+    const answer = answers[i]!;
+    if (!(answer instanceof Error)) asked.push({ a, remote: answer });
+    else if (change.skipRefused) skipped.push({ url: a.url, problem: answer.message });
+    else throw answer;
+  }
+  if (!space && !asked.length) throw new Error(`${name} would hold no repository: ${skipped.map((s) => s.problem).join("; ")}`);
+
+  // The workspace, then each repository new to the box, then the links.
+  let ref = space?.ref_id;
+  const created = !space;
+  if (!ref) {
+    const made = await graph<Written>(ctx, "create-node", { node_type: WORKSPACE, node_data: { name } });
+    if (made.status === "Warning") {
+      const other = list.workspaces.find((w) => w.ref_id === made.ref_id);
       throw new Error(`"${name}" can't be a workspace beside "${other?.name ?? "another"}": strut's graph keys the two names alike`);
     }
-    await link(ctx, fresh.ref_id, repo.ref_id);
-    made.push(name);
+    ref = made.ref_id;
+    // One deleted before comes back as new: without 0.6's `main`.
+    if (made.messages?.some((m) => /restored/i.test(m))) await graph(ctx, "edit-node", { ref_id: ref, properties_to_be_deleted: ["main"] }).catch(() => undefined);
   }
-  const deleted: string[] = [];
-  for (const space of list.workspaces) {
-    if (wanted.includes(space.name) || !space.repositories.includes(url)) continue;
-    if ((await leave(ctx, space, repo)) === "deleted") deleted.push(space.name);
+  const already = space ? holds : await membersOf(ctx, ref, list.repositories);
+  const fresh: string[] = [];
+  for (const { a, remote } of asked) {
+    let repo = list.repositories.find((r) => r.url === a.url);
+    if (!repo) {
+      repo = await newRepository(ctx, a, remote, list);
+      list.repositories.push(repo);
+      fresh.push(a.url);
+    }
+    if (!already.has(a.url)) await link(ctx, ref, repo.ref_id);
   }
-  return { url, workspaces: wanted.sort(), made, deleted };
+  const wanted = new Set([...holds, ...asked.map((x) => x.a.url)]);
+  for (const u of removing) wanted.delete(u);
+  // A workspace restored from a soft delete keeps only what was asked for.
+  const stale = space ? removing : [...already].filter((u) => !wanted.has(u));
+  const self: Space = space ?? { ref_id: ref, name, repositories: [...already] };
+  const left = await takeOut(ctx, list, self, stale);
+
+  const nameOf = new Map(list.repositories.map((r) => [r.url, r.name]));
+  const sorted = (urls: Iterable<string>) => [...urls].sort((a, b) => (nameOf.get(a) ?? a).localeCompare(nameOf.get(b) ?? b) || a.localeCompare(b));
+  return {
+    workspace: name,
+    created,
+    repositories: sorted(wanted),
+    added: sorted(asked.map((x) => x.a.url).filter((u) => !holds.has(u))),
+    removed: sorted(removing),
+    new: sorted(fresh),
+    left: sorted(left),
+    ...(skipped.length ? { skipped } : {}),
+  };
 }
 
-/** Name a workspace's main repository: one already in it. */
-export async function setMain(ctx: Ctx, workspace: unknown, url: string) {
-  const name = workspaceName(workspace);
+/** Rename a workspace in place: the node keeps its ref_id, so what other
+ *  packages keep on it (pods' `.pod/`) stays with it. Its page, when it has
+ *  one, takes the new name too. */
+export async function renameWorkspace(ctx: Ctx, from: unknown, to: unknown) {
+  const old = workspaceName(from);
+  const name = workspaceName(to);
+  const list = await readList(ctx);
+  const space = list.workspaces.find((w) => w.name === old);
+  if (!space) throw new Error(`there is no workspace ${old}`);
+  if (old === name) return { workspace: name, renamed: false };
+  if (list.workspaces.some((w) => w.name === name)) throw new Error(`there is a workspace ${name} already`);
+  try {
+    await graph(ctx, "edit-node", { ref_id: space.ref_id, node_data: { name } });
+  } catch (e) {
+    throw new Error(`${old} can't be renamed ${name}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  let page: string | undefined;
+  if (space.page) {
+    // Its page follows it; one that can't (that name is a page already) stays, and says so.
+    page = await graph(ctx, "edit-node", { ref_id: space.page.ref_id, node_data: { name: pageName(name) } })
+      .then(() => pageName(name))
+      .catch((e: unknown) => {
+        throw new Error(`${old} is ${name} now, but its page is still "${space.page!.name}": ${e instanceof Error ? e.message : String(e)}`);
+      });
+  }
+  return { workspace: name, renamed: true, from: old, ...(page ? { page } : {}) };
+}
+
+/** Delete a workspace: its page first, then its links, then the node, and
+ *  each repository it was the last workspace of. What other packages keep
+ *  on the node (pods' `.pod/`) goes with it, by strut's rule. */
+export async function deleteWorkspace(ctx: Ctx, raw: unknown) {
+  const name = workspaceName(raw);
   const list = await readList(ctx);
   const space = list.workspaces.find((w) => w.name === name);
   if (!space) throw new Error(`there is no workspace ${name}`);
-  if (!space.repositories.includes(url)) throw new Error(`${url} is not in ${name}: put it there first`);
-  if (space.main !== url) await graph(ctx, "edit-node", { ref_id: space.ref_id, node_data: { main: url } });
-  return { workspace: name, main: url };
+  // The page first: a refusal leaves the workspace and its page as they were.
+  if (space.page) await graph(ctx, "delete-node", { ref_id: space.page.ref_id, reason: `its workspace, ${name}, was deleted` });
+  const left = await takeOut(ctx, list, space, space.repositories);
+  await graph(ctx, "delete-node", { ref_id: space.ref_id, reason: "deleted in the Code app" });
+  return { deleted: name, left };
+}
+
+/**
+ * `check`'s first step: when the box has no workspace, make the default
+ * from what the forges reach, as the run's person (the check workflow's
+ * owner). Nothing when the box has one, or nothing is reached. A box whose
+ * people delete every workspace gets it again at the next check.
+ */
+export async function makeDefault(ctx: Ctx) {
+  const list = await readList(ctx);
+  if (list.workspaces.length) return { made: false, why: "the box has a workspace" };
+  const reached = await reach(ctx);
+  const choice = defaultWorkspace(reached.repositories);
+  if (!choice) {
+    const why = reached.problem ?? reached.hosts.map((h) => (h.problem ? `${h.host}: ${h.problem}` : "")).filter(Boolean).join("; ");
+    return { made: false, why: `no forge reaches a repository as this run's person${why ? ` (${why})` : ""}` };
+  }
+  const made = await changeWorkspace(ctx, { name: choice.name, repositories: choice.repositories, create: true, skipRefused: true });
+  return { made: true, workspace: made.workspace, repositories: made.repositories, ...(made.skipped ? { skipped: made.skipped } : {}) };
 }
 
 /** `check`'s pass: ask every remote, record a moved head (and branch), say
- *  why one failed, and name the repositories whose head is not ingested. */
+ *  why one failed, and name the repositories whose head is not ingested.
+ *  A workspace still carrying 0.6's `main` has it cleared. */
 export async function checkHeads(ctx: Ctx) {
   const list = await readList(ctx);
+  for (const w of list.workspaces.filter((s) => s.oldMain)) {
+    await graph(ctx, "edit-node", { ref_id: w.ref_id, properties_to_be_deleted: ["main"] }).catch(() => undefined);
+  }
   const at = now();
   const moved: string[] = [];
   const ingest: string[] = [];
   const problems: Array<{ url: string; problem: string }> = [];
-  // Whom it asks as, named once and only when a remote refuses.
-  let named: Promise<Asker> | undefined;
-  const as = () => (named ??= asker(ctx));
-  const one = async (repo: Repo) => {
-    try {
-      const remote = await askRemote(ctx, repo.url, as);
-      const data: Record<string, string> = { checked: at };
-      if (remote.head !== repo.head) {
-        data["head"] = remote.head;
-        moved.push(repo.url);
-      }
-      if (remote.branch !== repo.branch) data["branch"] = remote.branch;
-      await graph(ctx, "edit-node", { ref_id: repo.ref_id, node_data: data, ...(repo.problem ? { properties_to_be_deleted: ["problem"] } : {}) });
-      if (remote.head !== repo.ingested) ingest.push(repo.url);
-    } catch (e) {
-      const problem = e instanceof Error ? e.message : String(e);
-      problems.push({ url: repo.url, problem });
+  const answers = await askAll(ctx, list.repositories.map((r) => r.url));
+  for (const [i, repo] of list.repositories.entries()) {
+    const remote = answers[i]!;
+    if (remote instanceof Error) {
+      problems.push({ url: repo.url, problem: remote.message });
       // A repository removed while this ran has no node to write to.
-      await graph(ctx, "edit-node", { ref_id: repo.ref_id, node_data: { checked: at, problem } }).catch(() => undefined);
+      await graph(ctx, "edit-node", { ref_id: repo.ref_id, node_data: { checked: at, problem: remote.message } }).catch(() => undefined);
+      continue;
     }
-  };
-  // Four remotes at a time.
-  const queue = [...list.repositories];
-  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
-    for (let repo = queue.shift(); repo; repo = queue.shift()) await one(repo);
-  }));
+    const data: Record<string, string> = { checked: at };
+    if (remote.head !== repo.head) {
+      data["head"] = remote.head;
+      moved.push(repo.url);
+    }
+    if (remote.branch !== repo.branch) data["branch"] = remote.branch;
+    await graph(ctx, "edit-node", { ref_id: repo.ref_id, node_data: data, ...(repo.problem ? { properties_to_be_deleted: ["problem"] } : {}) }).catch(() => undefined);
+    if (remote.head !== repo.ingested) ingest.push(repo.url);
+  }
   return { checked: list.repositories.length, moved: moved.sort(), ingest: ingest.sort(), problems };
 }
 

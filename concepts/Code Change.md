@@ -10,11 +10,13 @@ they review it there.
 
 ## 1. Find the repository
 
-Call `stadeum_code_repositories`. Each repository comes with its `url`,
-its default `branch` and its `workspaces`. Take the one the person means.
-When they named none and the box holds several, ask before anything else.
-A repository that isn't listed isn't the box's: say so, and that an admin
-adds it in the Code app.
+Call `stadeum_code_repositories`. It gives the box's workspaces, each
+with its `repositories`, and `reachable`: every repository the person's
+own accounts reach. Take the one the person means: in a workspace, in
+`reachable`, or the https address they gave. When they named none and
+several fit, ask before anything else. A repository none of these has,
+and no address for it, is one this box can't reach as them: say so, and
+that they connect the account that reads it.
 
 ## 2. Small or deeper
 
@@ -30,6 +32,8 @@ alone?
 
 ## 3. A small change, in a checkout
 
+It needs no workspace.
+
 1. `git_checkout { repo: <url>, workdir: <your job id> }`.
 2. Find the place and make the edit. Install, build and test nothing.
 3. If it turns out deeper than it looked (the value is computed, tests or
@@ -38,28 +42,44 @@ alone?
 4. Stage it with `bash` (`git add -A` in the checkout), then `git_push {
    path: <the absolute path git_checkout returned>, branch: <a new
    branch>, message }`.
-5. Open the pull request with your pull-request tool for the repository's
-   host (`github_create_pr { repo: <url>, head: <your branch>, base: <the
-   default branch>, title, body }` for github.com). With none, say the
-   branch is pushed (its name, on `url`) and that this box has no tool to
-   open the pull request.
+5. Open the pull request with `git_pull_request { url, head: <your
+   branch>, base: <the default branch>, title, body }`. It opens it on
+   the forge that serves the repository's host, as the person. When it
+   says no forge here opens pull requests for that host, say the branch
+   is pushed (its name, on `url`) and that this box can't open the pull
+   request.
 
 Its claim is checked by the person looking at the pull request (an
 external check): nothing runs it here.
 
 ## 4. A deeper change, on a pod
 
-Claim a pod (`stadeum_pods_claim`) for a workspace the repository is in:
-the one it is main of, unless the request is about another. Once you hold
-it, open the `Pod` page (`graph_graph_get { node_type: "Concept", name:
-"Pod" }`) and work as it says, with the pod tools. Make the change, run
-the app and its tests, and look at it in the browser. Commit it on a new
-branch and push with the pod's `git` (`push -u origin <branch>`, with
-`pr`): that opens the pull request.
+**Pick the workspace.** A pod is claimed for a workspace, which holds
+the repositories the change needs to run. Of the workspaces whose
+`repositories` hold this one, take the smallest that is ready: it has a
+`page`, which only a baked workspace has. With none ready, the smallest
+that holds it. When the change spans several repositories, the smallest
+that holds them all. When none holds it, make one with
+`stadeum_code_workspace { name, repositories }`, named after the
+repository, with the repositories the change needs, and set it up in
+this job (below).
 
-A workspace never set up (the claim gives a bare pod, with no image) is
-set up on the way, as the `Pod` page says. Its `.pod/` goes in a pull
-request of its own, then the change in another. Say so in `text`.
+**Say which in your first message,** before the work: the workspace,
+its repositories, and why it was chosen (or made). The person can
+correct you in words, and you move to the one they name.
+
+Claim a pod (`stadeum_pods_claim`) for it. Once you hold it, open the
+`Pod` page (`graph_graph_get { node_type: "Concept", name: "Pod" }`) and
+work as it says, with the pod tools. Make the change, run the app and its
+tests, and look at it in the browser. Commit it on a new branch and push
+with the pod's `git` (`push -u origin <branch>`, with `pr`): that opens
+the pull request.
+
+A workspace never set up (the claim gives a bare pod, with no image),
+yours or one you just made, is set up on the way, as the `Pod` page
+says. Its setup (`/workspaces/.pod`) is the workspace's, kept on the box
+when it is baked: it goes in no pull request, so the pull request holds
+the change alone. Say in `text` that you set it up.
 
 A tool the build needs that the pod can run (a Rust toolchain for one
 crate of a Node app) goes in the workspace's image, not this job's shell:

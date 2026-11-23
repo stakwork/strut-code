@@ -1,13 +1,17 @@
 package: stadeum/code
-version: 0.6.2
-description: Your team's repos and workspaces, kept up to date, so agents can read and change your code.
+version: 0.7.0
+description: Your team's workspaces, sets of repos kept up to date, so agents can read and change your code.
 job:
-  # Its own `repositories`, and strut's `git/push`: a small change is pushed
-  # as the job's person to a new branch, never the default one, from the
-  # job's own checkout (strut's guards). It does not ask first: the pull
-  # request opened on the branch is the person's review, and a push waiting
-  # on a yes would end the turn before the pull request could be opened.
-  tools: [repositories, git/push]
+  # Its own `repositories` and `workspace`: Jamie reads the box's workspaces
+  # and what the forges reach as the job's person, and makes a workspace, or
+  # adds to one, when a job needs it. Strut's `git/push` pushes a small
+  # change as the job's person to a new branch, never the default one, from
+  # the job's own checkout (strut's guards), and `git/pull-request` opens
+  # the pull request with the step of the forge that serves the remote's host
+  # (stakwork/strut#851). Neither asks first: the pull request opened on the
+  # branch is the person's review, and a push waiting on a yes would end the
+  # turn before the pull request could be opened.
+  tools: [repositories, workspace, git/push, git/pull-request]
 schedules:
   - workflow: check
     trigger: { every: interval, minutes: 15 }

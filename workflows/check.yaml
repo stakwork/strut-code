@@ -1,5 +1,7 @@
-description: Every 15 minutes, check each repo for new commits.
+description: Every 15 minutes, check each repo for new commits, and make the box's first workspace when it has none.
 steps:
+  - id: default
+    type: default-workspace
   - id: heads
     type: heads
   - id: ingest

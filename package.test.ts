@@ -1,16 +1,20 @@
 /**
  * stadeum/code on a strut server, the way it runs on a box: installed from
  * this directory (`file:`) into a strut started in this process from a
- * checkout of stakwork/strut's main (`STRUT_DIR`, default `../strut`, with
- * its install), on a LadybugDB file. Then driven as the Code app's page
- * drives it (an admin's call and a member's), as the schedule runs `check`,
- * and as the job agent calls `repositories`. A job of the kind `Code Change`
- * is launched too, to see its turn open with the package's page: the model
- * is stood in for through strut's hook on every model it builds, recording
+ * checkout of stakwork/strut (`STRUT_DIR`, default `../strut`, with its
+ * install), on a LadybugDB file. Then driven as the Code app's page drives
+ * it (a person making and changing workspaces, an admin's call from another
+ * app), as the schedule runs `check`, and as the job agent calls
+ * `repositories` and `workspace`. A job of the kind `Code Change` is
+ * launched too, to see its turn open with the package's page: the model is
+ * stood in for through strut's hook on every model it builds, recording
  * what each turn gave it. For a small change it is scripted (strut's own
- * mock model): it checks the repository out, edits it and pushes a new
- * branch with strut's `git/push`, as the job's person, and is refused the
- * default branch.
+ * mock model): it checks the repository out, edits it, pushes a new branch
+ * with strut's `git/push` as the job's person, is refused the default
+ * branch, and opens the pull request with strut's `git/pull-request`.
+ *
+ * It needs a strut with the package seams of stakwork/strut#851:
+ * `git/repositories`, `git/pull-request` and their `provides.git` fields.
  *
  * It reaches github.com: the public repositories it adds are this package's
  * own and stadeum/pods', and a missing one is refused as a private one is,
@@ -20,7 +24,9 @@
  * git's `insteadOf` in the shell strut is given: the token lookup and git's
  * credential helper both see the same host, `127.0.0.1:<port>`. Another
  * package stands in for a forge's, serving that host with `LAB_TOKEN`
- * (`provides.git`), and each person's token is their own secret. No one's real token is read: GITHUB_TOKEN is unset here.
+ * (`provides.git`), with the steps that say what a person's token reaches
+ * and open a pull request; each person's token is their own secret. No
+ * one's real token is read: GITHUB_TOKEN is unset here.
  *
  *   STRUT_DIR=../strut npm test
  */
@@ -32,7 +38,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { address, askRemote, remoteProblem, workspaceName, workspaceNames } from "./steps/_code.ts";
+import { address, askRemote, defaultWorkspace, reach, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
 import { addressToAdd } from "./apps/code/src/input.ts";
 
 const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
@@ -48,17 +54,16 @@ const APP = "stadeum/code/code";
 const HEX = /^[0-9a-f]{40}$/;
 const PAGE = "Code Change";
 
-/** Another package, whose app an admin may open, granting this package's
- *  steps and its `add` workflow: it must change nothing. It also stands in
- *  for a forge's package, serving the private repositories' host. */
+/** Another package, whose app a person may open, granting this package's
+ *  steps: it must change nothing. It also stands in for a forge's package,
+ *  serving the private repositories' host: what a person's token reaches
+ *  there, and a pull request opened there. */
 const OTHER_APP = "acme/other/console";
 const OTHER: Record<string, string> = {
-  "strut.yaml": "package: acme/other\nversion: 0.1.0\n",
   "apps/console/app.yaml": [
     "title: Console",
     "grants:",
-    "  workflows: [stadeum/code/add]",
-    "  steps: [stadeum/code/repositories, stadeum/code/remove, stadeum/code/place, stadeum/code/main]",
+    "  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/rename, stadeum/code/delete]",
     "",
   ].join("\n"),
   "apps/console/src/App.tsx": "export default function App() { return <p>console</p>; }\n",
@@ -86,7 +91,7 @@ const git = (cwd: string, ...args: string[]) =>
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-describe("an address", () => {
+describe("an address, a name and the default workspace", () => {
   it("is written one way, so the same repository typed twice is one address", () => {
     for (const typed of [CODE, `${CODE}/`, `${CODE}.git`, `${CODE}.git/`, "  HTTPS://GitHub.com/stakwork/strut-code  ", "https://github.com//stakwork/strut-code"]) {
       assert.equal(address(typed).url, CODE, typed);
@@ -119,12 +124,42 @@ describe("an address", () => {
     for (const [typed, why] of refused) assert.throws(() => address(typed), why, typed);
   });
 
-  it("names a repository's own workspace after it, then after its owner, then numbered", () => {
-    assert.deepEqual(workspaceNames(address("https://github.com/Stakwork/Hive")).slice(0, 3), ["hive", "stakwork-hive", "hive-2"]);
-    assert.equal(workspaceNames(address("https://example.com/a/X.Y_")).at(0), "x.y");
+  it("takes a workspace's name in lowercase, and refuses one that is not a name", () => {
     assert.equal(workspaceName(" Hive "), "hive");
     assert.throws(() => workspaceName("my workspace"), /not a workspace's name/);
     assert.throws(() => workspaceName("-x"), /not a workspace's name/);
+    assert.throws(() => workspaceName("x".repeat(64)), /not a workspace's name/);
+  });
+
+  it("makes the default of every repository picked, or the five most recently pushed, named after their owner", () => {
+    const r = (owner: string, name: string, pushed: string, picked?: true): Reach => ({ url: `https://github.com/${owner}/${name}`, name, pushed, ...(picked ? { picked } : {}) });
+    // Picked on GitHub: every one, whatever another org granted whole.
+    const picked = [r("Stakwork", "hive", "2026-11-01", true), r("stakwork", "stakgraph", "2026-10-01", true), r("acme", "app", "2026-11-20", true), r("other", "x", "2026-11-22")];
+    assert.deepEqual(defaultWorkspace(picked), { name: "stakwork", repositories: ["https://github.com/Stakwork/hive", "https://github.com/acme/app", "https://github.com/stakwork/stakgraph"].sort() });
+    // An org that granted all of them: the five most recently pushed.
+    const all = ["a", "b", "c", "d", "e", "f", "g"].map((n, i) => r("stakwork", n, `2026-11-${String(10 + i).padStart(2, "0")}T00:00:00Z`));
+    assert.deepEqual(defaultWorkspace(all)?.repositories, ["c", "d", "e", "f", "g"].map((n) => `https://github.com/stakwork/${n}`));
+    assert.equal(defaultWorkspace(all)?.name, "stakwork");
+    // A forge that says nothing of when: the first five, by name.
+    assert.equal(defaultWorkspace(all.map(({ pushed: _p, ...x }) => x))?.repositories.length, 5);
+    // An owner's name made a workspace's: lowercase, what a name takes.
+    assert.equal(defaultWorkspace([r("Acme_Corp", "x", "2026-11-01")])?.name, "acme_corp");
+    // A forge with groups: the group the repositories are in.
+    assert.equal(defaultWorkspace([{ url: "https://gitlab.example.com/acme/platform/x", name: "x" }])?.name, "platform");
+    assert.equal(defaultWorkspace([]), undefined);
+  });
+
+  it("lets anyone make workspaces, from the Code app or as the job's person, and never a call that is nobody's (the one switch: admins)", () => {
+    const code = { name: APP, version: "1" };
+    assert.equal(refusal({ app: code, actor: "ada" }), undefined, "a person in the Code app");
+    assert.equal(refusal({ actor: "ada", principal: "ada" }), undefined, "the job agent, as its person");
+    assert.match(refusal({ app: { name: OTHER_APP }, actor: "ada" }) ?? "", /made and changed in the Code app \(stadeum\/code\/code\), not from acme\/other\/console/);
+    assert.match(refusal({ app: { name: APP, version: "preview-3" }, actor: "ada" }) ?? "", /not from a preview of it/);
+    assert.match(refusal({}) ?? "", /made as a person/);
+    // Admins alone: their call in the Code app, nobody else's, and no job's.
+    assert.equal(refusal({ app: { ...code, admin: true }, actor: "root" }, "admins"), undefined);
+    assert.match(refusal({ app: code, actor: "ada" }, "admins") ?? "", /only an admin/);
+    assert.match(refusal({ actor: "ada", principal: "ada" }, "admins") ?? "", /only an admin/);
   });
 
   it("says from strut's error what a person can act on, and whose access is missing", () => {
@@ -132,7 +167,7 @@ describe("an address", () => {
     const denied = `remote_denied: ${url} asks for a credential — it is private, or there is no repository there — and this run has no token for its host`;
     assert.equal(
       remoteProblem(url, denied, { you: true }),
-      `${url} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for git.example.test, or that account cannot read it. Connect one that can, then add it again.`,
+      `${url} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for git.example.test, or that account cannot read it. Connect one that can, then try again.`,
     );
     assert.equal(
       remoteProblem(url, `remote_denied: ${url} refused the run's token for git.example.test: it cannot read this repository, or there is none there`, { who: "Ada (ada)", scheduled: true }),
@@ -142,36 +177,27 @@ describe("an address", () => {
     assert.equal(remoteProblem(url, `remote_not_found: no repository at ${url}`, { you: true }), `there is no repository at ${url} that you can see`);
     assert.equal(remoteProblem(url, `remote_not_found: no repository at ${url}`, { who: "ada", scheduled: true }), `there is no repository at ${url} that ada, whom the check runs as (its workflow's owner), can see`);
     assert.equal(remoteProblem(url, `remote_unreachable: ${url} did not answer in 30 s`), `${url} can't be reached: did not answer in 30 s`);
-    assert.equal(remoteProblem(url, `remote_unreachable: ${url}: fatal: unable to access: Could not resolve host`), `${url} can't be reached: fatal: unable to access: Could not resolve host`);
     assert.equal(remoteProblem(url, `remote_empty: ${url} has no commits yet: its remote names no head`), `${url} has no commits yet: its remote names no head`);
   });
 
-  it("fills the Code app's Add field from the address it is opened with, for an admin alone, and adds nothing", async () => {
-    // The link another app opens it with (stadeum/github's picker), read back
-    // as a host reads it: `?input=` as flat strings, the app's tool input.
+  it("opens New workspace with the address the Code app is opened with, for a person who may make one, and makes nothing", async () => {
     const { appLink } = (await import(pathToFileURL(join(STRUT, "kit", "src", "links.ts")).href)) as { appLink: (name: string, input?: Record<string, string>) => string };
     const opened = (input: Record<string, string>) => Object.fromEntries(new URLSearchParams(new URLSearchParams(appLink(APP, input).slice(1)).get("input") ?? ""));
     assert.equal(addressToAdd(opened({ add: CODE }), true), CODE);
     assert.equal(addressToAdd({ add: `  ${CODE}.git\n` }, true), `${CODE}.git`, "trimmed, otherwise as given");
-    // A member's app draws no Add, and the input changes nothing.
-    assert.equal(addressToAdd(opened({ add: CODE }), false), undefined);
-    // Only an https address fills it: anything else leaves the app as it is.
-    for (const input of [undefined, {}, { view: CODE }, { add: "" }, { add: "   " }, { add: 42 }, { add: [CODE] }, { add: "strut-code" }, { add: "git@github.com:stakwork/strut-code.git" }, { add: "ssh://git@github.com/stakwork/strut-code" }, { add: "http://github.com/stakwork/strut-code" }, { add: "file:///etc/passwd" }, { add: "javascript:alert(1)" }]) {
+    assert.equal(addressToAdd(opened({ add: CODE }), false), undefined, "a viewer who may not make one");
+    for (const input of [undefined, {}, { view: CODE }, { add: "" }, { add: 42 }, { add: [CODE] }, { add: "strut-code" }, { add: "git@github.com:stakwork/strut-code.git" }, { add: "http://github.com/stakwork/strut-code" }, { add: "javascript:alert(1)" }]) {
       assert.equal(addressToAdd(input, true), undefined, JSON.stringify(input));
-    }
-    // Filled as given: Add checks it then exactly as one typed (`add` runs `address`).
-    for (const [given, why] of [
-      ["https://user:token@github.com/stakwork/strut-code", /no user name or token/],
-      ["https://github.com/stakwork/strut-code?x=1", /no \? or # part/],
-      ["https://github.com/stakwork", /owner and its name/],
-    ] as const) {
-      assert.equal(addressToAdd({ add: given }, true), given);
-      assert.throws(() => address(addressToAdd({ add: given }, true)), why, given);
     }
   });
 
-  it("says plainly what an older strut lacks: the step it asks a remote with", async () => {
+  it("says plainly what an older strut lacks: the steps it asks a remote and the forges with", async () => {
     await assert.rejects(askRemote({ registry: {} }, CODE), /strut's git\/remote-head step, and this strut server has none: it needs a newer strut \(the step came with stakwork\/strut#798/);
+    assert.deepEqual(await reach({ registry: {} }), {
+      repositories: [],
+      hosts: [],
+      problem: "this strut lists no forge's repositories: that needs strut's git/repositories step (stakwork/strut#851). A repository can still be added by its address",
+    });
   });
 });
 
@@ -192,48 +218,53 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   let script: unknown[] | undefined;
 
   /** A call from an app's page (the Code app's unless named), as its viewer: `admin` when strut says so. */
-  const page = (actor: string, admin: boolean, app = APP) => {
+  const page = (actor: string, admin = false, app = APP) => {
     const t = tools.buildAppTools({ apps: strut.apps, registry: strut.getRegistry(), services: strut.services, actor, admin, runStepDeps: { store, workspace: strut.workspace } });
     return async (type: string, config: Record<string, unknown> = {}): Promise<{ error?: string; result?: any }> =>
       t[STEP_RUN].execute({ type, config, app: appIdentity(app, versions[app]!) }, { toolCallId: "t", messages: [] });
   };
-  const admin = () => page("root", true);
-  const member = () => page("ada", false);
-  /** The page's Add: launch the `add` workflow, then wait for its end. */
-  const add = async (call: ReturnType<typeof page>, url: string) => {
-    const launched = await call("run/launch", { workflow: "stadeum/code/add", input: { url } });
-    assert.equal(launched.error, undefined, launched.error);
-    const run = await call("run/get", { workflow: "stadeum/code/add", runId: launched.result.runId, wait: 50_000 });
-    assert.equal(run.error, undefined, run.error);
-    return run.result as { status: string; output?: any; error?: { message: string } };
-  };
-  const list = async () => {
-    const r = await admin()("stadeum/code/repositories");
+  const ada = () => page("ada");
+  /** Another person's call from the Code app. */
+  const member = (type: string, config: Record<string, unknown> = {}) => page("bob")(type, config);
+  /** The Code app's New workspace, or a change to one, as `who`: its answer or why not. */
+  const make = async (who: ReturnType<typeof page>, config: Record<string, unknown>) => who("stadeum/code/workspace", config);
+  const made = async (who: ReturnType<typeof page>, config: Record<string, unknown>) => {
+    const r = await make(who, config);
     assert.equal(r.error, undefined, r.error);
-    return r.result as { repositories: any[]; workspaces: any[]; admin: boolean };
+    return r.result;
   };
-  /** Run one step as a workflow of its own would: no page, no app. */
-  const once = async (name: string, step: string, config: Record<string, unknown>, actor = "root") => {
+  const list = async (reachable = false) => {
+    const r = await ada()("stadeum/code/repositories", { reachable });
+    assert.equal(r.error, undefined, r.error);
+    return r.result as { repositories: any[]; workspaces: any[]; reachable?: any[]; hosts?: any[]; may: boolean };
+  };
+  /** One step as a workflow of its own runs it: no page, no app, as `actor`. */
+  const run = async (name: string, step: string, config: Record<string, unknown>, actor?: string) => {
     await strut.workspace.publishWorkflowByContent(`test/${name}`, `steps:\n  - id: s\n    type: ${step}\n    config: ${JSON.stringify(config)}\n`);
-    const run = await strut.run(`test/${name}`, {}, { actor, principal: actor });
-    assert.equal(run.status, "success", JSON.stringify(run.error));
-    return run.output.s ?? run.output;
+    return strut.run(`test/${name}`, {}, actor ? { actor, principal: actor } : {});
+  };
+  const once = async (name: string, step: string, config: Record<string, unknown>, actor = "root") => {
+    const r = await run(name, step, config, actor);
+    assert.equal(r.status, "success", JSON.stringify(r.error));
+    return r.output.s ?? r.output;
   };
   /** A page's text as its file holds it, front matter left out. */
   const pageText = async (name = PAGE) => (await readFile(join(HERE, "concepts", `${name}.md`), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "").trim();
   const repo = async (url: string) => (await list()).repositories.find((r) => r.url === url);
   const space = async (name: string) => (await list()).workspaces.find((w) => w.name === name);
+  /** A node's ref_id by type and key, or none. */
+  const refOf = async (type: string, where: Record<string, string>) => (await once(`ref-${randomBytes(4).toString("hex")}`, "graph/find", { node_type: type, where })).nodes[0]?.ref_id as string | undefined;
   /** A Concept page by name, or why there is none. */
   const concept = (name: string) => once(`concept-${randomBytes(4).toString("hex")}`, "graph/graph-get", { node_type: "Concept", name });
   /** A page under `Codebase`, as stadeum/pods writes a workspace's at the
    *  bake (and the dream, later, a repository's). Its ref_id. */
   const bake = async (name: string) => {
-    const made = await once(`bake-${name}`, "graph/create-node", {
+    const made = await once(`bake-${randomBytes(4).toString("hex")}`, "graph/create-node", {
       node_type: "Concept",
       node_data: { name, description: `The ${name}: its systems and how they connect.`, docs: "```mermaid\nflowchart LR\n  app -->|API_URL| api\n```\n" },
     });
     const root = await concept("Codebase");
-    await once(`bake-${name}-under`, "graph/create-triplet", { source_ref_id: root.ref_id, target_ref_id: made.ref_id, edge_type: "PARENT_OF" });
+    await once(`bake-under-${randomBytes(4).toString("hex")}`, "graph/create-triplet", { source_ref_id: root.ref_id, target_ref_id: made.ref_id, edge_type: "PARENT_OF" });
     return made.ref_id as string;
   };
 
@@ -252,6 +283,9 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   const ownSecret = async (actor: string, name: string, value: string) => {
     const res = await strut.app.request(`/actors/${actor}/secrets/${name}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) });
     assert.equal(res.status < 300, true, await res.text());
+  };
+  const dropSecret = async (actor: string, name: string) => {
+    await strut.app.request(`/actors/${actor}/secrets/${name}`, { method: "DELETE" });
   };
   /** The check workflow's owner: whom its schedule runs as. */
   const giveCheckTo = async (owner: string) => {
@@ -369,11 +403,57 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     };
     await install(HERE);
     const other = join(root, "acme-other");
-    // It serves the private repositories' host too, as a forge's package
-    // (a GitLab one) would: the secret its token is (`provides.git`).
+    // A forge's package for the private repositories' host, as a GitLab one
+    // would be: the secret its token is, the step that says what a
+    // person's token reaches (each picked, one of them twice and one no
+    // address), and the step that opens a pull request.
     const files = {
       ...OTHER,
-      "strut.yaml": [OTHER["strut.yaml"]!.trim(), "requires:", "  optional: [LAB_TOKEN]", "provides:", "  git:", `    - { host: "${priv.host}", secret: LAB_TOKEN }`, ""].join("\n"),
+      "strut.yaml": [
+        "package: acme/other",
+        "version: 0.1.0",
+        "requires:",
+        "  optional: [LAB_TOKEN]",
+        "provides:",
+        "  git:",
+        `    - { host: "${priv.host}", secret: LAB_TOKEN, repositories: repositories, pull_request: pull-request }`,
+        "",
+      ].join("\n"),
+      "steps/repositories.ts": [
+        'import { z, defineStep } from "strut";',
+        "export default defineStep({",
+        '  type: "acme/other/repositories",',
+        '  description: "What the person\'s lab token reaches.",',
+        '  effect: "read",',
+        "  input: z.object({}),",
+        "  output: z.any(),",
+        "  async run(_cfg, ctx: any) {",
+        '    if (!(await ctx.services.secrets.get("LAB_TOKEN"))) throw new Error("connect your lab account");',
+        "    return { repositories: [",
+        `      { url: "${SECRET}", name: "secret", private: true, pushed: "2026-11-20T10:00:00Z", description: "The secret one", picked: true },`,
+        `      { url: "${OTHER_SECRET}.git", name: "other", private: true, pushed: "2026-11-21T10:00:00Z", picked: true },`,
+        `      { url: "${SECRET}/", name: "secret" },`,
+        '      { url: "not an address", name: "nothing" },',
+        "    ] };",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+      "steps/pull-request.ts": [
+        'import { z, defineStep } from "strut";',
+        "export default defineStep({",
+        '  type: "acme/other/pull-request",',
+        '  description: "Open a pull request on the lab.",',
+        '  effect: "write",',
+        "  input: z.object({ url: z.string(), head: z.string(), base: z.string(), title: z.string(), body: z.string().optional() }),",
+        "  output: z.any(),",
+        "  async run(cfg, ctx: any) {",
+        '    if (!(await ctx.services.secrets.get("LAB_TOKEN"))) throw new Error("no_push_permission: connect your lab account");',
+        "    return { url: `${cfg.url}/pulls/7`, number: 7, head: cfg.head, base: cfg.base, title: cfg.title };",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
     };
     for (const [rel, text] of Object.entries(files)) {
       await mkdir(dirname(join(other, rel)), { recursive: true });
@@ -388,16 +468,16 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it("installs whole: its types, app, workflows, the job's tool and the schedule", async () => {
+  it("installs whole: its types, app, workflows, the job's tools and the schedule", async () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.6.2");
+    assert.equal(pkg.version, "0.7.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
-    assert.ok(job.params.tools.includes("stadeum/code/repositories"), "the job agent is granted the tool");
-    assert.ok(job.params.tools.includes("git/push"), "and strut's git/push");
-    assert.ok(!(job.params.approve ?? []).includes("git/push"), "which does not ask first: the pull request is the person's review");
+    for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(job.params.tools.includes(t), `the job agent is granted ${t}`);
+    assert.deepEqual((job.params.approve ?? []).filter((t: string) => t.startsWith("stadeum/code/") || t.startsWith("git/")), [], "none asks first: the pull request is the person's review");
+    assert.equal(await strut.workspace.getWorkflow("stadeum/code/add").catch(() => undefined), undefined, "no Add a repository apart from a workspace");
     const { automations } = await (await strut.app.request("/automations")).json();
     const check = automations.find((a: any) => a.package === "stadeum/code");
     assert.ok(check, "check's schedule is installed");
@@ -424,11 +504,11 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.match(root.properties.description, /a page for each workspace that has been baked/);
   });
 
-  it("opens a Code Change job's turn with the page, the kind listed and the repositories tool granted", async () => {
+  it("opens a Code Change job's turn with the page, the kind listed and its tools granted", async () => {
     const before = turns.length;
     const message = "Make the Add button blue.";
-    const run = await strut.run("job", { prompt: message, kind: PAGE }, { job: "code-change-kind", actor: "ada", principal: "ada" });
-    assert.match(JSON.stringify(run.error), /stand-in model/, "the turn reached the model");
+    const r = await strut.run("job", { prompt: message, kind: PAGE }, { job: "code-change-kind", actor: "ada", principal: "ada" });
+    assert.match(JSON.stringify(r.error), /stand-in model/, "the turn reached the model");
     const turn = turns[before];
     assert.ok(turn, "the model was called");
     const { kindLead, kindEnd } = (await strut.workspace.getWorkflow("job")).params;
@@ -443,11 +523,12 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.ok(section.includes(await pageText()), "the page whole");
     // Every turn's system prompt lists the kinds under Job, this one among them.
     assert.match(turn.system, /- Code Change — A request to change the code of one of the box's repositories/);
-    // The page's first call, by the name it gives it.
-    assert.ok(turn.tools.includes("stadeum_code_repositories"), turn.tools.join(", "));
-    assert.ok(turn.tools.includes("git_checkout"), "and strut's checkout");
-    assert.ok(turn.tools.includes("git_push"), "and strut's push, the package's grant");
-    assert.ok(!turn.tools.includes("github_create_pr"), "no forge's package here: no pull-request tool");
+    // Each tool the page names, by the name it gives it.
+    for (const t of ["stadeum_code_repositories", "stadeum_code_workspace", "git_checkout", "git_push", "git_pull_request"]) {
+      assert.ok(turn.tools.includes(t), `${t} in ${turn.tools.join(", ")}`);
+      if (t !== "git_checkout") assert.ok((await pageText()).includes(t), `the page names ${t}`);
+    }
+    assert.ok(!(await pageText()).includes("github_create_pr"), "the page names no forge's pull-request step");
     // The deeper path sends it to the `Pod` page, another kind under Job:
     // it opens a kind's page by name, as its system prompt says.
     assert.ok(turn.tools.includes("graph_graph_get"), "it can open another page");
@@ -459,191 +540,199 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.ok(turns[before + 1]?.prompt.endsWith(`Your job id: code-change-none. ${message}`), turns[before + 1]?.prompt);
   });
 
-  it("shows a member the list and refuses a member's changes", async () => {
-    const seen = await member()("stadeum/code/repositories");
-    assert.equal(seen.error, undefined, seen.error);
-    assert.deepEqual(seen.result, { repositories: [], workspaces: [], admin: false });
-    const run = await add(member(), CODE);
-    assert.equal(run.status, "error");
-    assert.match(run.error?.message ?? "", /only an admin changes the box's repositories/);
-    for (const [type, config] of [
-      ["stadeum/code/remove", { url: CODE }],
-      ["stadeum/code/place", { url: CODE, workspaces: ["x"] }],
-      ["stadeum/code/main", { workspace: "x", url: CODE }],
-    ] as const) {
-      assert.match((await member()(type, config)).error ?? "", /only an admin/, type);
-    }
-    assert.deepEqual((await list()).repositories, []);
+  it("shows a person the empty box, and why a forge reached nothing for them", async () => {
+    const seen = await list(true);
+    const { hosts, ...rest } = seen;
+    assert.deepEqual(rest, { repositories: [], workspaces: [], reachable: [], may: true });
+    assert.equal(hosts?.length, 1);
+    assert.equal(hosts![0].host, priv.host);
+    assert.ok(hosts![0].problem, "the lab says why it reached nothing");
   });
 
-  it("adds a public repository by its address, in a workspace of its own, and ingests it once", async () => {
-    const run = await add(admin(), `${CODE}.git/`);
-    assert.equal(run.status, "success", JSON.stringify(run.error));
+  it("lets anyone make a workspace in the Code app, from public repositories, each asked for as them", async () => {
+    const out = await made(ada(), { name: "Strut", repositories: [PODS, `${CODE}.git`], create: true });
+    assert.deepEqual(out, { workspace: "strut", created: true, repositories: [CODE, PODS], added: [CODE, PODS], removed: [], new: [CODE, PODS], left: [] });
     const r = await repo(CODE);
-    assert.ok(r, "listed");
     assert.equal(r.name, "strut-code");
     assert.equal(r.branch, "main");
     assert.match(r.head, HEX);
-    assert.ok(Date.now() - Date.parse(r.checked) < 120_000, "checked now");
-    assert.equal(r.ingested, r.head, "ingest ran once");
-    assert.deepEqual(r.workspaces, ["strut-code"]);
-    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: CODE, repositories: [CODE] });
+    assert.ok(Date.now() - Date.parse(r.checked) < 120_000, "asked now");
+    assert.equal(r.ingested, undefined, "the next check ingests it");
+    assert.deepEqual(r.workspaces, ["strut"]);
+    assert.deepEqual(await space("strut"), { name: "strut", repositories: [CODE, PODS] }, "no main repository");
+    // A name taken is refused to Create, and changes nothing.
+    assert.match((await make(page("bob"), { name: "strut", repositories: [CODE], create: true })).error ?? "", /there is a workspace strut already/);
+    assert.deepEqual((await space("strut")).repositories, [CODE, PODS]);
   });
 
-  it("refuses an admin's change from any app but the Code app, and lists nothing changed", async () => {
-    const elsewhere = () => page("root", true, OTHER_APP);
+  it("refuses a change from any app but the Code app, and from a run that is nobody's", async () => {
     const before = await list();
-    const seen = await elsewhere()("stadeum/code/repositories");
+    const elsewhere = page("root", true, OTHER_APP);
+    const seen = await elsewhere("stadeum/code/repositories", { reachable: false });
     assert.equal(seen.error, undefined, seen.error);
-    assert.equal(seen.result.admin, false, "the other app draws no admin controls");
-    const refused = /the box's repositories are changed in the Code app \(stadeum\/code\/code\), not from acme\/other\/console/;
+    assert.equal(seen.result.may, false, "the other app draws no controls");
+    const refused = /workspaces are made and changed in the Code app \(stadeum\/code\/code\), not from acme\/other\/console/;
     for (const [type, config] of [
-      ["stadeum/code/remove", { url: CODE }],
-      ["stadeum/code/place", { url: CODE, workspaces: ["elsewhere"] }],
-      ["stadeum/code/main", { workspace: "strut-code", url: CODE }],
+      ["stadeum/code/workspace", { name: "elsewhere", repositories: [CODE] }],
+      ["stadeum/code/rename", { workspace: "strut", name: "elsewhere" }],
+      ["stadeum/code/delete", { workspace: "strut" }],
     ] as const) {
-      assert.match((await elsewhere()(type, config)).error ?? "", refused, type);
+      assert.match((await elsewhere(type, config)).error ?? "", refused, type);
     }
-    const run = await add(elsewhere(), PODS);
-    assert.equal(run.status, "error");
-    assert.match(run.error?.message ?? "", refused);
+    const nobody = await run("nobody", "stadeum/code/workspace", { name: "nobodys", repositories: [CODE] });
+    assert.equal(nobody.status, "error");
+    assert.match(JSON.stringify(nobody.error), /made as a person/);
     assert.deepEqual(await list(), before);
   });
 
-  it("makes one node however the same repository is typed", async () => {
-    const run = await add(admin(), "HTTPS://GitHub.com/stakwork/strut-code");
-    assert.equal(run.status, "success", JSON.stringify(run.error));
+  it("puts one repository in several workspaces, one node however it is typed", async () => {
+    const out = await made(ada(), { name: "code", repositories: ["HTTPS://GitHub.com/stakwork/strut-code"] });
+    assert.deepEqual(out.new, [], "already the box's");
     const l = await list();
     assert.equal(l.repositories.filter((r) => r.url === CODE).length, 1);
-    assert.equal(l.workspaces.length, 1);
+    assert.deepEqual(l.repositories.find((r) => r.url === CODE).workspaces, ["code", "strut"]);
+    assert.deepEqual(l.workspaces.map((w) => w.name), ["code", "strut"]);
   });
 
-  it("refuses a private repository, or none, plainly, and lists nothing", async () => {
-    const run = await add(admin(), MISSING);
-    assert.equal(run.status, "error");
-    assert.match(run.error?.message ?? "", /asks for a sign-in: it is private, or there is no repository there/);
-    const ssh = await add(admin(), "git@github.com:stakwork/strut-code.git");
-    assert.match(ssh.error?.message ?? "", /an ssh address/);
-    assert.equal((await list()).repositories.length, 1);
+  it("refuses a repository the person can't read, or none, plainly, and changes nothing", async () => {
+    const before = await list();
+    const missing = await make(ada(), { name: "x", repositories: [CODE, MISSING] });
+    assert.match(missing.error ?? "", /asks for a sign-in: it is private, or there is no repository there, and you have no access to it/);
+    assert.match((await make(ada(), { name: "x", repositories: ["git@github.com:stakwork/strut-code.git"] })).error ?? "", /an ssh address/);
+    assert.match((await make(ada(), { name: "x" })).error ?? "", /holds one repository at least/);
+    assert.match((await make(ada(), { name: "x y", repositories: [CODE] })).error ?? "", /not a workspace's name/);
+    assert.match((await make(ada(), { name: "code", repositories: [MISSING] })).error ?? "", /you have no access to it/);
+    assert.deepEqual(await list(), before);
   });
 
-  it("puts a repository in a second workspace, and names a workspace's main one", async () => {
-    assert.equal((await add(admin(), PODS)).status, "success");
-    const placed = await admin()("stadeum/code/place", { url: PODS, workspaces: ["strut-pods", "strut-code"] });
-    assert.equal(placed.error, undefined, placed.error);
-    assert.deepEqual((await repo(PODS)).workspaces, ["strut-code", "strut-pods"]);
-    assert.deepEqual((await space("strut-code")).repositories, [CODE, PODS], "the main one first");
-    const main = await admin()("stadeum/code/main", { workspace: "strut-code", url: PODS });
-    assert.equal(main.error, undefined, main.error);
-    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: PODS, repositories: [PODS, CODE] });
-    assert.match((await admin()("stadeum/code/main", { workspace: "strut-pods", url: CODE })).error ?? "", /is not in strut-pods: put it there first/);
-    // A new name makes a workspace, with it as main; one it leaves empty goes.
-    const moved = await admin()("stadeum/code/place", { url: PODS, workspaces: ["strut-code", "Stadeum"] });
-    assert.equal(moved.error, undefined, moved.error);
-    assert.deepEqual(moved.result.deleted, ["strut-pods"]);
-    assert.deepEqual(await space("stadeum"), { name: "stadeum", main: PODS, repositories: [PODS] });
-    assert.equal(await space("strut-pods"), undefined);
-    assert.match((await admin()("stadeum/code/place", { url: PODS, workspaces: [] })).error ?? "", /one workspace at least|too_small|at least 1/i);
+  it("takes a repository out of a workspace, and one in no other leaves the box", async () => {
+    const out = await made(ada(), { name: "strut", remove: [PODS] });
+    assert.deepEqual(out, { workspace: "strut", created: false, repositories: [CODE], added: [], removed: [PODS], new: [], left: [PODS] });
+    assert.equal(await repo(PODS), undefined, "off the box");
+    assert.equal(await refOf("Repository", { url: PODS }), undefined, "its node deleted");
+    const kept = await made(ada(), { name: "code", repositories: [PODS], remove: [] });
+    assert.deepEqual(kept.new, [PODS], "back, as new");
+    const out2 = await made(ada(), { name: "code", remove: [CODE] });
+    assert.deepEqual(out2.left, [], "still in strut");
+    assert.deepEqual((await repo(CODE)).workspaces, ["strut"]);
+    assert.match((await make(ada(), { name: "strut", remove: [CODE] })).error ?? "", /strut would hold no repository: delete it instead/);
+    assert.match((await make(ada(), { name: "strut", remove: [PODS] })).error ?? "", /is not in strut/);
+    assert.match((await make(ada(), { name: "none", remove: [PODS] })).error ?? "", /there is no workspace none/);
   });
 
-  it("checks each remote, records a head that moved, and ingests it", async () => {
+  it("checks each remote, records a head that moved, and ingests what is new", async () => {
     const before = await repo(CODE);
     // Make the graph think the remote moved since: an old head, ingested.
     const stale = "0".repeat(40);
-    const found = await once("find", "graph/find", { node_type: "Repository", where: { url: CODE } });
-    await once("stale", "graph/edit-node", { ref_id: found.nodes[0].ref_id, node_data: { head: stale, ingested: stale } });
+    await once("stale", "graph/edit-node", { ref_id: await refOf("Repository", { url: CODE }), node_data: { head: stale, ingested: stale } });
     assert.equal((await repo(CODE)).head, stale);
 
-    const run = await strut.run("stadeum/code/check", {}, { actor: "root", principal: "root" });
-    assert.equal(run.status, "success", JSON.stringify(run.error));
+    const r = await strut.run("stadeum/code/check", {}, { actor: "root", principal: "root" });
+    assert.equal(r.status, "success", JSON.stringify(r.error));
+    assert.deepEqual((await list()).workspaces.map((w) => w.name), ["code", "strut"], "the box has workspaces: no default");
     const after = await repo(CODE);
     assert.equal(after.head, before.head, "the remote's head, recorded");
     assert.equal(after.ingested, after.head, "and ingested");
     assert.ok(Date.parse(after.checked) >= Date.parse(before.checked));
     assert.equal(after.problem, undefined);
+    const pods = await repo(PODS);
+    assert.equal(pods.ingested, pods.head, "a repository new to the box is ingested at the next check");
   });
 
-  it("gives a baked workspace its page, the Concept `<workspace> workspace`, and none to one never baked", async () => {
-    assert.equal((await space("stadeum")).page, undefined, "not baked: no page");
-    // The bare name is the main repository's page, not the workspace's.
-    await bake("strut-code");
-    const stadeum = await bake("stadeum workspace");
-    const codeSpace = await bake("strut-code workspace");
-    assert.deepEqual((await space("stadeum")).page, { name: "stadeum workspace", ref_id: stadeum });
-    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: PODS, repositories: [PODS, CODE], page: { name: "strut-code workspace", ref_id: codeSpace } });
-    // A member sees it too: the link is every person's.
-    const seen = await member()("stadeum/code/repositories");
-    assert.deepEqual(seen.result.workspaces.find((w: any) => w.name === "stadeum").page, { name: "stadeum workspace", ref_id: stadeum });
+  it("clears 0.6's main from a workspace that still carries it", async () => {
+    const ref = await refOf("Workspace", { name: "strut" });
+    await once("old-main", "graph/edit-node", { ref_id: ref, node_data: { main: CODE } });
+    assert.equal((await once("old-main-read", "graph/find", { node_type: "Workspace", where: { name: "strut" } })).nodes[0].properties.main, CODE);
+    assert.deepEqual(await space("strut"), { name: "strut", repositories: [CODE] }, "never read");
+    assert.equal((await strut.run("stadeum/code/check", {}, { actor: "root", principal: "root" })).status, "success");
+    assert.equal((await once("old-main-after", "graph/find", { node_type: "Workspace", where: { name: "strut" } })).nodes[0].properties.main ?? undefined, undefined);
   });
 
-  it("answers the job agent's tool with the list, each baked workspace's page, and no admin flag", async () => {
-    const out = await once("tool", "stadeum/code/repositories", {}, "ada");
-    assert.equal(out.admin, undefined);
-    assert.deepEqual(out.workspaces.map((w: any) => w.name), ["stadeum", "strut-code"]);
-    assert.deepEqual(out.workspaces.map((w: any) => w.page?.name), ["stadeum workspace", "strut-code workspace"]);
-    assert.deepEqual(out.repositories.map((r: any) => r.url), [CODE, PODS]);
+  it("renames a workspace in place, its page with it", async () => {
+    const node = await refOf("Workspace", { name: "code" });
+    const pageRef = await bake("code workspace");
+    assert.deepEqual((await space("code")).page, { name: "code workspace", ref_id: pageRef });
+    const out = await ada()("stadeum/code/rename", { workspace: "code", name: "Pods" });
+    assert.equal(out.error, undefined, out.error);
+    assert.deepEqual(out.result, { workspace: "pods", renamed: true, from: "code", page: "pods workspace" });
+    assert.deepEqual(await space("pods"), { name: "pods", repositories: [PODS], page: { name: "pods workspace", ref_id: pageRef } });
+    assert.equal(await space("code"), undefined);
+    assert.equal(await refOf("Workspace", { name: "pods" }), node, "the same node: what is kept on it stays");
+    assert.match((await ada()("stadeum/code/rename", { workspace: "pods", name: "strut" })).error ?? "", /there is a workspace strut already/);
+    assert.match((await ada()("stadeum/code/rename", { workspace: "nope", name: "x" })).error ?? "", /there is no workspace nope/);
   });
 
-  it("removes a repository from every workspace, and a workspace left empty goes, its page with it", async () => {
-    const pageOf = async (name: string) => (await space(name))?.page;
-    const kept = await pageOf("strut-code");
-    const one = await admin()("stadeum/code/remove", { url: PODS });
+  it("deletes a workspace: its page, and each repository in no other workspace", async () => {
+    // A member sees the page too: the link is every person's.
+    assert.equal((await member("stadeum/code/repositories")).result.workspaces.find((w: any) => w.name === "pods").page.name, "pods workspace");
+    const one = await ada()("stadeum/code/delete", { workspace: "pods" });
     assert.equal(one.error, undefined, one.error);
-    assert.deepEqual(one.result, { removed: PODS, left: ["strut-code"], deleted: ["stadeum"] });
-    assert.deepEqual(await space("strut-code"), { name: "strut-code", main: CODE, repositories: [CODE], page: kept }, "its main moved to the one left, its page kept");
-    assert.match(String(await concept("stadeum workspace")), /node not found: Concept "stadeum workspace"/, "the empty workspace's page went with it");
-    assert.equal((await concept("strut-code workspace")).ref_id, kept!.ref_id);
-    const two = await admin()("stadeum/code/remove", { url: CODE });
-    assert.deepEqual(two.result.deleted, ["strut-code"]);
-    assert.deepEqual(await list(), { repositories: [], workspaces: [], admin: true });
-    assert.match(String(await concept("strut-code workspace")), /node not found/);
-    assert.equal((await concept("strut-code")).name, "strut-code", "the repository's own page is not the workspace's");
+    assert.deepEqual(one.result, { deleted: "pods", left: [PODS] });
+    assert.match(String(await concept("pods workspace")), /node not found: Concept "pods workspace"/, "its page went with it");
+    await bake("strut-code");
+    const two = await ada()("stadeum/code/delete", { workspace: "strut" });
+    assert.deepEqual(two.result, { deleted: "strut", left: [CODE] });
+    assert.deepEqual(await list(), { repositories: [], workspaces: [], may: true });
+    assert.equal((await concept("strut-code")).name, "strut-code", "a repository's own page is not the workspace's");
     assert.equal((await concept("Codebase")).name, "Codebase", "and the root stays");
-    // Added again, it starts over as new: its own workspace, ingested once more, with no page until it is baked again.
-    assert.equal((await add(admin(), CODE)).status, "success");
-    const back = await repo(CODE);
-    assert.deepEqual(back.workspaces, ["strut-code"]);
-    assert.equal(back.ingested, back.head);
-    assert.equal((await space("strut-code")).page, undefined);
+    // Made again, it starts over: no page until it is baked again.
+    await made(ada(), { name: "strut", repositories: [CODE], create: true });
+    assert.equal((await space("strut")).page, undefined);
+    assert.deepEqual((await space("strut")).repositories, [CODE], "only what was asked for");
+    assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "strut" })).result, { deleted: "strut", left: [CODE] });
   });
 
-  it("reads a private repository with the caller's own token for its host, and refuses it without one", async () => {
-    const first = git(work, "rev-parse", "HEAD");
-    // No token of the admin's own: refused, said so, and nothing listed.
-    const refused = await add(admin(), SECRET);
-    assert.equal(refused.status, "error");
-    assert.match(
-      refused.error?.message ?? "",
-      new RegExp(`${esc(SECRET)} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for ${esc(priv.host)}, or that account cannot read it\\. Connect one that can, then add it again\\.`),
-    );
-    assert.equal(await repo(SECRET), undefined);
-    assert.ok(priv.seen.length > 0 && priv.seen.every((s) => s.password === undefined), "asked with no token");
-
-    // The admin connects their account for that host: read with their token.
+  it("makes the default workspace at check when the box has none, from what the forges reach as the check's owner", async () => {
+    assert.deepEqual((await list()).workspaces, []);
+    // root owns check, and has connected nothing for the lab: none made.
+    let ran = await fireCheck();
+    assert.equal(ran.status, "success", JSON.stringify(ran.error));
+    assert.equal(ran.principal, "root");
+    assert.deepEqual((await list()).workspaces, []);
+    // root connects: every repository picked there, named after their owner.
     await ownSecret("root", "LAB_TOKEN", TOKEN);
-    const run = await add(admin(), SECRET);
-    assert.equal(run.status, "success", JSON.stringify(run.error));
+    ran = await fireCheck();
+    assert.equal(ran.status, "success", JSON.stringify(ran.error));
+    assert.deepEqual(await space("team"), { name: "team", repositories: [OTHER_SECRET, SECRET] });
     const r = await repo(SECRET);
-    assert.equal(r.name, "secret");
     assert.equal(r.branch, "trunk", "the remote's own default branch");
-    assert.equal(r.head, first);
-    assert.equal(r.ingested, first, "ingested once");
-    assert.deepEqual(r.workspaces, ["secret"]);
-    assert.ok(priv.seen.some((s) => s.password === TOKEN), "the token reached its own host");
+    assert.equal(r.ingested, r.head, "ingested in the same check");
+    // Once the box has one, no other.
+    ran = await fireCheck();
+    assert.deepEqual((await list()).workspaces.map((w) => w.name), ["team"]);
+  });
 
-    // It is the caller's own: another admin with none of their own, or one
-    // the host refuses, can't add a private repository though root can.
-    const bob = await add(page("bob", true), OTHER_SECRET);
-    assert.equal(bob.status, "error");
-    assert.match(bob.error?.message ?? "", /and you have no access to it: you have not connected an account for/);
+  it("lists what a person's forges reach, picked or not, written one way, as them", async () => {
+    // ada has connected nothing: the lab says so.
+    const none = (await list(true)).hosts ?? [];
+    assert.ok(none.length === 1 && none[0].host === priv.host && none[0].problem, JSON.stringify(none));
+    await ownSecret("ada", "LAB_TOKEN", TOKEN);
+    const seen = await list(true);
+    assert.deepEqual(seen.hosts, [{ host: priv.host }]);
+    assert.deepEqual(seen.reachable, [
+      { url: OTHER_SECRET, name: "other", private: true, pushed: "2026-11-21T10:00:00Z", picked: true },
+      { url: SECRET, name: "secret", private: true, pushed: "2026-11-20T10:00:00Z", description: "The secret one", picked: true },
+    ]);
+    await dropSecret("ada", "LAB_TOKEN");
+  });
+
+  it("puts a private repository in a workspace with the person's own token for its host, and refuses it without one", async () => {
+    const before = priv.seen.length;
+    const refused = await make(ada(), { name: "mine", repositories: [SECRET], create: true });
+    assert.match(
+      refused.error ?? "",
+      new RegExp(`${esc(SECRET)} asks for a sign-in: it is private, or there is no repository there, and you have no access to it: you have not connected an account for ${esc(priv.host)}, or that account cannot read it\\. Connect one that can, then try again\\.`),
+    );
+    assert.ok(priv.seen.slice(before).every((s) => s.password === undefined), "asked with no token");
     await ownSecret("bob", "LAB_TOKEN", WRONG);
-    const wrong = await add(page("bob", true), OTHER_SECRET);
-    assert.equal(wrong.status, "error");
-    assert.match(wrong.error?.message ?? "", /and you have no access to it/);
-    assert.ok(!(wrong.error?.message ?? "").includes(WRONG));
-    assert.equal(await repo(OTHER_SECRET), undefined);
-    // A public repository is read as before, whatever the caller holds.
-    assert.equal((await repo(CODE))?.problem, undefined);
+    const wrong = await make(page("bob"), { name: "mine", repositories: [SECRET] });
+    assert.match(wrong.error ?? "", /and you have no access to it/);
+    assert.ok(!(wrong.error ?? "").includes(WRONG));
+    assert.equal(await space("mine"), undefined);
+    await ownSecret("ada", "LAB_TOKEN", TOKEN);
+    const ok = await made(ada(), { name: "mine", repositories: [SECRET], create: true });
+    assert.deepEqual(ok.new, [], "already the box's, in team");
+    assert.ok(priv.seen.slice(before).some((s) => s.password === TOKEN), "the token reached its own host");
   });
 
   it("checks a private repository as the check workflow's owner, and names them in its problem when they have no access", async () => {
@@ -657,24 +746,23 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(r.ingested, second, "and ingested");
     assert.equal(r.problem, undefined);
 
-    // ada owns check now, and has connected no account for that host. An
-    // admin opening the app reads ada's name in the problem, not their own.
-    await giveCheckTo("ada");
+    // carl owns check now, and has connected no account for that host. A
+    // person opening the app reads carl's name in the problem, not their own.
+    await giveCheckTo("carl");
     const third = pushCommit("third");
     const denied = await fireCheck();
     assert.equal(denied.status, "success", JSON.stringify(denied.error));
-    assert.equal(denied.principal, "ada");
+    assert.equal(denied.principal, "carl");
     r = await repo(SECRET);
     assert.equal(r.head, second, "not read");
     assert.equal(
       r.problem,
-      `${SECRET} asks for a sign-in: it is private, or there is no repository there, and ada, whom the check runs as (its workflow's owner), has no access to it: ` +
-        `ada has not connected an account for ${priv.host}, or that account cannot read it. Either ada connects one that can, or an admin gives the check workflow an owner whose account can.`,
+      `${SECRET} asks for a sign-in: it is private, or there is no repository there, and carl, whom the check runs as (its workflow's owner), has no access to it: ` +
+        `carl has not connected an account for ${priv.host}, or that account cannot read it. Either carl connects one that can, or an admin gives the check workflow an owner whose account can.`,
     );
-    assert.equal((await repo(CODE)).problem, undefined, "a public repository is read as before");
 
-    // ada connects one: the next check reads it, and the problem goes.
-    await ownSecret("ada", "LAB_TOKEN", TOKEN);
+    // carl connects one: the next check reads it, and the problem goes.
+    await ownSecret("carl", "LAB_TOKEN", TOKEN);
     const again = await fireCheck();
     assert.equal(again.status, "success", JSON.stringify(again.error));
     r = await repo(SECRET);
@@ -684,7 +772,21 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     await giveCheckTo("root");
   });
 
-  it("pushes a Code Change job's small change to a new branch as the job's person, and is refused the default branch", async () => {
+  it("answers the job agent's tools as the job's person: the workspaces, what they reach, and a workspace made", async () => {
+    await bake("team workspace");
+    const out = await once("tool", "stadeum/code/repositories", {}, "ada");
+    assert.equal(out.may, undefined, "no page, no flag");
+    assert.deepEqual(out.workspaces.map((w: any) => [w.name, w.page?.name]), [["mine", undefined], ["team", "team workspace"]]);
+    assert.deepEqual(out.reachable.map((r: any) => r.url), [OTHER_SECRET, SECRET]);
+    const tool = await once("tool-workspace", "stadeum/code/workspace", { name: "jobbed", repositories: [CODE, OTHER_SECRET] }, "ada");
+    assert.deepEqual(tool, { workspace: "jobbed", created: true, repositories: [OTHER_SECRET, CODE], added: [OTHER_SECRET, CODE], removed: [], new: [CODE], left: [] });
+    // As the job's person: one with no token for the lab can't put its repositories in.
+    const refused = await run("tool-refused", "stadeum/code/workspace", { name: "jobbed", repositories: [SECRET] }, "dan");
+    assert.equal(refused.status, "error");
+    assert.match(JSON.stringify(refused.error), /dan has no access to it/);
+  });
+
+  it("pushes a Code Change job's small change to a new branch as the job's person, refused the default branch, and opens its pull request", async () => {
     // A file to change on the private repository's default branch, trunk.
     const bare = join(root, "remotes", "team", "secret");
     await writeFile(join(work, "style.css"), "button { color: red; }\n");
@@ -727,20 +829,21 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
       // The absolute path git_checkout returned: the default branch first, then a new one.
       () => call("default", "git_push", { path, branch: "trunk", message }),
       () => call("push", "git_push", { path, branch, message }),
+      () => call("pr", "git_pull_request", { url: SECRET, head: branch, base: "trunk", title: message, body: "Blue, as asked." }),
       (prompt: any) => {
         read = (id) => answered(prompt, id);
-        return call("done", "final_answer", { text: `Pushed ${branch} to ${SECRET}. This box has no tool to open the pull request.`, artifacts: [] });
+        return call("done", "final_answer", { text: `Opened ${SECRET}/pulls/7.`, artifacts: [] });
       },
     ];
     const before = turns.length;
     try {
-      const run = await strut.run("job", { prompt: "Make the Add button blue.", kind: PAGE }, { job, actor: "ada", principal: "ada" });
-      assert.equal(run.status, "success", JSON.stringify(run.error));
+      const r = await strut.run("job", { prompt: "Make the Add button blue.", kind: PAGE }, { job, actor: "ada", principal: "ada" });
+      assert.equal(r.status, "success", JSON.stringify(r.error));
     } finally {
       script = undefined;
       await ownSecret("root", "LAB_TOKEN", TOKEN);
     }
-    assert.ok(turns[before]?.tools.includes("git_push"), "the turn holds strut's git/push");
+    assert.ok(turns[before]?.tools.includes("git_pull_request"), "the turn holds strut's git/pull-request");
     assert.ok(turns[before]!.prompt.includes(await pageText()), "and opens with the page");
     // The checkout is the job's own, at an absolute path.
     assert.equal(path, join(root, "jobs", job, "secret"));
@@ -752,18 +855,18 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal(heads.length, 2, heads.join("\n"));
     assert.equal(heads[1], `trunk ${trunk} test`, "trunk as it was");
     assert.match(heads[0]!, new RegExp(`^${esc(branch)} [0-9a-f]{40} strut$`), "authored as strut: the token is not GitHub's");
-    assert.equal(git(bare, "rev-parse", `${branch}^`), trunk);
     assert.equal(git(bare, "show", `${branch}:style.css`), "button { color: blue; }");
-    assert.equal(git(bare, "diff", "--name-only", trunk, branch), "style.css");
     // As ada: the push carried her token, the only one the host takes.
     const pushes = priv.seen.slice(pushesBefore).filter((r) => r.path.includes("git-receive-pack"));
-    assert.ok(pushes.length > 0, "a push reached the host");
     assert.ok(pushes.some((r) => r.password === TOKEN), "with ada's token");
     assert.ok(priv.seen.slice(pushesBefore).every((r) => r.password !== WRONG), "never root's");
+    // The pull request, opened by the lab's own step, picked by the host.
+    assert.match(read("pr"), new RegExp(`"url":"${esc(SECRET)}/pulls/7"`), read("pr"));
+    assert.match(read("pr"), new RegExp(`"head":"${esc(branch)}"`));
   });
 
   it("never puts a token in a node, a run's output or an error", async () => {
-    const said: string[] = [JSON.stringify(await list()), JSON.stringify(await once("repository-nodes", "graph/find", { node_type: "Repository" }))];
+    const said: string[] = [JSON.stringify(await list(true)), JSON.stringify(await once("repository-nodes", "graph/find", { node_type: "Repository" }))];
     for (const events of store.events.values()) said.push(JSON.stringify(events));
     for (const summary of store.summaries.values()) said.push(JSON.stringify(summary));
     const all = said.join("\n");
@@ -772,19 +875,21 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     for (const token of [TOKEN, WRONG]) assert.equal(all.includes(token), false, "a token is never said");
   });
 
-  it("goes with the package: the Code Change page, its place under Job and the job's tool; Codebase stays while a page hangs under it", async () => {
+  it("goes with the package: the Code Change page, its place under Job and the job's tools; Codebase stays while a page hangs under it", async () => {
     const res = await strut.app.request("/packages/stadeum/code", { method: "DELETE", headers: { "x-strut-actor": "root" } });
     const body = await res.json();
     assert.equal(res.status, 200, JSON.stringify(body));
-    // A page that is not the package's (here the repository's own) is under it.
-    assert.deepEqual(body.kept.filter((k: any) => k.kind === "concept"), [{ kind: "concept", name: "Codebase", reason: "strut-code hangs under it and stays, so it stays too" }]);
+    // Pages that are not the package's are under it.
+    assert.deepEqual(
+      body.kept.filter((k: any) => k.kind === "concept").map((k: any) => k.name),
+      ["Codebase"],
+    );
     assert.equal((await concept("Codebase")).name, "Codebase");
     const job = await once("job-kinds-after", "graph/graph-get", { node_type: "Concept", name: "Job", children: "PARENT_OF" });
     assert.equal(job.children.find((c: any) => c.name === PAGE), undefined, "no longer a kind");
     const gone = await once("code-change-page-after", "graph/graph-get", { node_type: "Concept", name: PAGE });
     assert.match(String(gone), /node not found: Concept "Code Change"/);
     const tools = (await strut.workspace.getWorkflow("job")).params.tools;
-    assert.ok(!tools.includes("stadeum/code/repositories"));
-    assert.ok(!tools.includes("git/push"), "strut's git/push goes with the grant");
+    for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(!tools.includes(t), `${t} goes with the grant`);
   });
 });

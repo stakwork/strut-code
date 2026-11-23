@@ -3,9 +3,12 @@ name: checks
 # Every PR and every push to main: the package installed from this checkout
 # into a strut started from stakwork/strut's main, on a LadybugDB file, and
 # driven as the Code app, the schedule and the job agent drive it
-# (package.test.ts). Strut is installed as its own CI installs it
-# (stakwork/strut .github/workflows/tests.yml): yarn.lock, no scripts, and
-# the kit's own install. The test reaches github.com for the public
+# (package.test.ts). The package needs strut's package seams
+# (stakwork/strut#851: git/repositories, git/pull-request): until strut's
+# main has them, strut is checked out at that pull request's branch. Strut
+# is installed as its own CI installs it (stakwork/strut
+# .github/workflows/tests.yml): yarn.lock, no scripts, and the kit's own
+# install. The test reaches github.com for the public
 # repositories it adds; a private one is served on the runner itself.
 
 on:
@@ -35,6 +38,15 @@ jobs:
           repository: stakwork/strut
           ref: main
           path: strut
+
+      - name: Until strut's main has the package seams, the branch of stakwork/strut#851
+        working-directory: strut
+        run: |
+          if ! grep -rqs 'type: "git/repositories"' src/steps; then
+            git fetch --quiet --depth=1 origin plan/package-seams
+            git checkout --quiet FETCH_HEAD
+            echo "strut's main has no git/repositories yet: testing on plan/package-seams (stakwork/strut#851)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/setup-node@v4
         with:

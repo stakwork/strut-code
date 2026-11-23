@@ -1,5 +1,5 @@
 package: stadeum/code
-version: 0.6.0
+version: 0.6.1
 description: Your team's repos and workspaces, kept up to date, so agents can read and change your code.
 job:
   # Its own `repositories`, and strut's `git/push`: a small change is pushed

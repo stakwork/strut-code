@@ -168,6 +168,16 @@ forge's, granted by that forge's package; this one names none.
 
 ## Versions
 
+- **0.6.1** `Code Change` §4 says what a pod is for:
+  - A tool the build needs that the pod can run goes in the workspace's
+    image (`.pod/`'s `Dockerfile`, then bake), not one job's shell.
+  - An app a pod can't run (a phone app; a platform or an architecture
+    it lacks) is changed in a checkout, and the pull request's checks run
+    it.
+  
+  The case behind it: a one-line Android change with a unit test went to
+  a bare arm64 pod. The agent installed the SDK there, ran `aapt2` under
+  qemu, then hit Robolectric's "not supported on Linux (aarch64)".
 - **0.6.0** The `Code Change` page reads the pull request's checks after
   opening it: CI is where a change runs that nothing here can, so a
   failed check is the agent's to read and fix, and a change is called

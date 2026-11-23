@@ -544,9 +544,9 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const seen = await list(true);
     const { hosts, ...rest } = seen;
     assert.deepEqual(rest, { repositories: [], workspaces: [], reachable: [], may: true });
-    assert.equal(hosts?.length, 1);
-    assert.equal(hosts![0].host, priv.host);
-    assert.ok(hosts![0].problem, "the lab says why it reached nothing");
+    // Each host the box serves, the lab's among them, says why it reached nothing.
+    const lab = hosts?.find((h) => h.host === priv.host);
+    assert.ok(lab?.problem, JSON.stringify(hosts));
   });
 
   it("lets anyone make a workspace in the Code app, from public repositories, each asked for as them", async () => {
@@ -704,11 +704,12 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
 
   it("lists what a person's forges reach, picked or not, written one way, as them", async () => {
     // ada has connected nothing: the lab says so.
-    const none = (await list(true)).hosts ?? [];
-    assert.ok(none.length === 1 && none[0].host === priv.host && none[0].problem, JSON.stringify(none));
+    const lab = (l: { hosts?: any[] }) => l.hosts?.find((h) => h.host === priv.host);
+    const none = await list(true);
+    assert.ok(lab(none)?.problem, JSON.stringify(none.hosts));
     await ownSecret("ada", "LAB_TOKEN", TOKEN);
     const seen = await list(true);
-    assert.deepEqual(seen.hosts, [{ host: priv.host }]);
+    assert.deepEqual(lab(seen), { host: priv.host });
     assert.deepEqual(seen.reachable, [
       { url: OTHER_SECRET, name: "other", private: true, pushed: "2026-11-21T10:00:00Z", picked: true },
       { url: SECRET, name: "secret", private: true, pushed: "2026-11-20T10:00:00Z", description: "The secret one", picked: true },

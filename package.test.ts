@@ -38,8 +38,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { address, askRemote, defaultWorkspace, reach, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
+import { address, askRemote, defaultWorkspace, noteOf, reach, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
 import { addressToAdd } from "./apps/code/src/input.ts";
+import { chatAbout, lookForChat } from "./apps/code/src/chat.ts";
 
 const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
 // Nobody's token: not this machine's, not its git's. github.com is read with none.
@@ -196,6 +197,55 @@ describe("an address, a name and the default workspace", () => {
       problem: "this strut lists no forge's repositories: that needs strut's git/repositories step (stakwork/strut#851). A repository can still be added by its address",
     });
   });
+
+  it("keeps Set up's additional information as the person wrote it, trimmed, and none when they wrote nothing", () => {
+    assert.equal(noteOf("  the UI is strut;\r\npeel is for reference\n"), "the UI is strut;\npeel is for reference");
+    for (const none of [undefined, null, "", "  \n "]) assert.equal(noteOf(none), undefined, JSON.stringify(none));
+    assert.equal(noteOf("x".repeat(4000)), "x".repeat(4000));
+    assert.throws(() => noteOf("x".repeat(4001)), /4001 characters: at most 4000 go on a workspace/);
+    assert.throws(() => noteOf(42), /a workspace's note is text/);
+  });
+
+  it("finds the viewer's chat about a workspace by its node, and none on a strut that doesn't know about", async () => {
+    const asked: Array<Record<string, unknown>> = [];
+    const answering = (out: unknown) => async (type: string, config: Record<string, unknown>) => {
+      assert.equal(type, "conversation/list");
+      asked.push(config);
+      if (out instanceof Error) throw out;
+      return out;
+    };
+    const ws = "ref-ws";
+    assert.deepEqual(await chatAbout(answering({ conversations: [{ id: "ada/1", title: "Set up team", about: ws }] }), ws), { session: "ada/1", title: "Set up team" });
+    assert.deepEqual(asked.at(-1), { about: ws, limit: 1 }, "the newest about it");
+    assert.deepEqual(await chatAbout(answering({ conversations: [] }), ws), { none: true });
+    // A strut that ignores `about` answers every chat of the viewer's: none is about it.
+    assert.deepEqual(await chatAbout(answering({ conversations: [{ id: "ada/2", title: "Lunch" }, { id: "ada/3", about: "another" }] }), ws), { none: true });
+    // One that refuses a package's page, or answers nothing like a list: it can't say.
+    const refused = await chatAbout(answering(new Error("conversation/* steps are not available to an app's page")), ws);
+    assert.match("unsupported" in refused ? refused.unsupported : "", /not available to an app's page/);
+    assert.ok("unsupported" in (await chatAbout(answering("nope"), ws)));
+  });
+
+  it("looks for the chat for a few seconds after Set up, and stops at once when strut can't say", async () => {
+    let t = 0;
+    const clock = { wait: async (ms: number) => void (t += ms), now: () => t };
+    let calls = 0;
+    const late = async () => (++calls < 4 ? { conversations: [] } : { conversations: [{ id: "ada/9", about: "ws" }] });
+    assert.deepEqual(await lookForChat(late, "ws", { within: 12_000, every: 1_000, ...clock }), { session: "ada/9" });
+    assert.equal(calls, 4, "found on the fourth look");
+    t = 0;
+    calls = 0;
+    const never = async () => (calls++, { conversations: [] });
+    assert.deepEqual(await lookForChat(never, "ws", { within: 12_000, every: 1_000, ...clock }), { none: true });
+    assert.equal(calls, 13, "every second for twelve");
+    calls = 0;
+    const refused = async () => {
+      calls++;
+      throw new Error("refused");
+    };
+    assert.ok("unsupported" in (await lookForChat(refused, "ws", clock)));
+    assert.equal(calls, 1);
+  });
 });
 
 describe("stadeum/code on strut", { timeout: 300_000 }, () => {
@@ -248,7 +298,28 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
   /** A page's text as its file holds it, front matter left out. */
   const pageText = async (name = PAGE) => (await readFile(join(HERE, "concepts", `${name}.md`), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "").trim();
   const repo = async (url: string) => (await list()).repositories.find((r) => r.url === url);
-  const space = async (name: string) => (await list()).workspaces.find((w) => w.name === name);
+  /** A workspace as the list gives it, its node's ref_id checked and left out. */
+  const space = async (name: string) => {
+    const found = (await list()).workspaces.find((w) => w.name === name);
+    if (!found) return undefined;
+    const { ref_id, ...w } = found;
+    assert.equal(ref_id, await refOf("Workspace", { name }), "the workspace's own node");
+    return w;
+  };
+  /** The runs `on: created: Workspace` started for a workspace's node,
+   *  once each is over: the stand-in setup's, as the person who wrote it. */
+  const setups = async (ref: string, want = 1) => {
+    for (let i = 0; i < 400; i++) {
+      const seen = [];
+      for (const id of await store.listRuns("acme/other/setup")) {
+        const s = await store.getRunSummary("acme/other/setup", id);
+        if (s?.input?.ref_id === ref && s.status !== "waiting" && s.status !== "running") seen.push(s);
+      }
+      if (seen.length >= want) return seen;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error(`no setup ran for ${ref}`);
+  };
   /** A node's ref_id by type and key, or none. */
   const refOf = async (type: string, where: Record<string, string>) => (await once(`ref-${randomBytes(4).toString("hex")}`, "graph/find", { node_type: type, where })).nodes[0]?.ref_id as string | undefined;
   /** A Concept page by name, or why there is none. */
@@ -414,6 +485,19 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
         "provides:",
         "  git:",
         `    - { host: "${priv.host}", secret: LAB_TOKEN, repositories: repositories, pull_request: pull-request }`,
+        // A stand-in for the package that sets workspaces up (stadeum/pods):
+        // it reads the workspace's node, its note on it, as pods' `setup` does.
+        "on:",
+        "  - { created: Workspace, workflow: setup }",
+        "",
+      ].join("\n"),
+      "workflows/setup.yaml": [
+        "description: Read a new workspace, as the package that sets workspaces up does.",
+        "steps:",
+        "  - id: node",
+        "    type: graph/graph-get",
+        "    config:",
+        '      ref_id: "{{ input.ref_id }}"',
         "",
       ].join("\n"),
       "steps/repositories.ts": [
@@ -469,7 +553,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.7.0");
+    assert.equal(pkg.version, "0.8.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(job.params.tools.includes(t), `the job agent is granted ${t}`);
@@ -560,6 +644,53 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     // A name taken is refused to Create, and changes nothing.
     assert.match((await make(page("bob"), { name: "strut", repositories: [CODE], create: true })).error ?? "", /there is a workspace strut already/);
     assert.deepEqual((await space("strut")).repositories, [CODE, PODS]);
+  });
+
+  it("writes Set up's additional information on the workspace as it is made, where whatever sets it up reads it, as the person who pressed it", async () => {
+    const before = await list();
+    // Only when it is made, and not over 4,000 characters: refused, nothing written.
+    assert.match((await make(ada(), { name: "strut", repositories: [CODE], note: "x" })).error ?? "", /strut is made already: additional information goes on a workspace when it is made/);
+    assert.match((await make(ada(), { name: "noted", repositories: [CODE], create: true, note: "x".repeat(4001) })).error ?? "", /at most 4000 go on a workspace/);
+    assert.deepEqual(await list(), before);
+
+    const note = "the UI is strut;\npeel is for reference";
+    const out = await made(ada(), { name: "noted", repositories: [CODE], create: true, note: `  the UI is strut;\r\n${"peel is for reference"}  ` });
+    assert.deepEqual(out, { workspace: "noted", created: true, repositories: [CODE], added: [CODE], removed: [], new: [], left: [] });
+    assert.deepEqual(await space("noted"), { name: "noted", repositories: [CODE], note });
+    // `on: created: Workspace` ran the stand-in for pods' setup as ada, and it read the note on the node.
+    const ref = (await refOf("Workspace", { name: "noted" }))!;
+    const [setup] = await setups(ref);
+    assert.equal(setup.status, "success", JSON.stringify(setup.error));
+    assert.equal(setup.principal, "ada", "as the person who pressed it");
+    assert.equal(setup.output.properties.note, note);
+
+    // The Code app asks strut for ada's chat about it, as her page: granted.
+    const call = ada();
+    const asked = await call("conversation/list", { about: ref, limit: 1 });
+    const found = await chatAbout(async (type, config) => {
+      const r = await call(type, config);
+      if (r.error) throw new Error(r.error);
+      return r.result;
+    }, ref);
+    if (strut.getRegistry()["conversation/start"]) {
+      // A strut with the seam (stakwork/strut#858): her chats about it, and none here, where nothing starts one.
+      assert.equal(asked.error, undefined, asked.error);
+      assert.deepEqual(found, { none: true });
+    } else {
+      // Before it, strut refuses a package's page every chat: no chat, and no link.
+      assert.match(asked.error ?? "", /not available to an app's page/, "the grant holds: strut's own guard refuses it");
+      assert.ok("unsupported" in found, JSON.stringify(found));
+    }
+
+    // Made again after a delete, it has that Set up's note, or none: never the last one's.
+    assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "noted" })).result, { deleted: "noted", left: [] });
+    await made(ada(), { name: "noted", repositories: [CODE], create: true });
+    assert.deepEqual(await space("noted"), { name: "noted", repositories: [CODE] });
+    await ada()("stadeum/code/delete", { workspace: "noted" });
+    await made(ada(), { name: "noted", repositories: [CODE], create: true, note: "Run the lab's app first." });
+    assert.equal((await space("noted"))?.note, "Run the lab's app first.");
+    assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "noted" })).result, { deleted: "noted", left: [] });
+    assert.deepEqual(await list(), before);
   });
 
   it("refuses a change from any app but the Code app, and from a run that is nobody's", async () => {
@@ -697,11 +828,14 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.deepEqual((await list()).workspaces, []);
     // Set up from another app, or by a run that is nobody's: refused.
     assert.match((await page("root", true, OTHER_APP)("stadeum/code/default-workspace")).error ?? "", /made and changed in the Code app/);
-    // root presses Set up: written as root.
-    const out = await root("stadeum/code/default-workspace");
+    // root presses Set up, with additional information: written as root, the note on it.
+    const out = await root("stadeum/code/default-workspace", { note: "The UI is secret; other is for reference." });
     assert.equal(out.error, undefined, out.error);
     assert.deepEqual(out.result, { workspace: "team", repositories: [OTHER_SECRET, SECRET] });
-    assert.deepEqual(await space("team"), { name: "team", repositories: [OTHER_SECRET, SECRET] });
+    assert.deepEqual(await space("team"), { name: "team", repositories: [OTHER_SECRET, SECRET], note: "The UI is secret; other is for reference." });
+    const [setup] = await setups((await refOf("Workspace", { name: "team" }))!);
+    assert.equal(setup.principal, "root", "its setup runs as the person who pressed Set up");
+    assert.equal(setup.output.properties.note, "The UI is secret; other is for reference.");
     assert.equal((await repo(SECRET)).branch, "trunk", "the remote's own default branch");
     // Once the box has one, nothing is suggested, and Set up is refused.
     assert.equal((await root("stadeum/code/repositories")).result.suggested, undefined);

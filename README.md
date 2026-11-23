@@ -20,7 +20,7 @@ secret.
 | `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, a workspace's page) |
 | `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
 | `concepts/Codebase.md` | The `Codebase` page, a root: short, and it stays as it is. Under it go a page for each workspace that has been baked, and later a page for each repository and each feature |
-| `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, and a link to its page once it is baked. **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
+| `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, a link to its page once it is baked, and a link to the viewer's chat about it. **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. It and the suggested default's **Set up** take optional **Additional information**, and right after either the app opens Jamie in the chat about the new workspace (`src/chat.ts`). A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
 | `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested. It writes no workspace |
 | `workflows/ingest.yaml` | Takes a repository in at its head. Today it only records the commit: a parser plugs in here, before `record` |
 | `steps/repositories.ts` | The job agent's tool and the app's read: the workspaces and their repositories, each workspace's page, and what the forges reach as the caller |
@@ -95,6 +95,22 @@ How it holds together:
   forges reach and written as them, so its setup runs as them; a
   repository whose remote refuses them is left out. No setup job starts
   unasked, and `check` writes no workspace.
+- **Set up lands in a Jamie chat** (the owner's rule, 2026-11-23,
+  stadeum's `plans/software.md` row 26: *"THE JAMIE CHAT IS THE BEST UI
+  FOR ALMOST EVERYTHING"*). Set up, the default's or New workspace's
+  Create, has one optional field, **Additional information**, for what the
+  person knows ("the UI is strut; peel is for reference"). It goes on the
+  `Workspace` as `note`, in the node's first write, so whatever sets
+  workspaces up reads it from its `on: created: Workspace` run. That
+  package (`stadeum/pods`) starts a Jamie chat of the person's `about` the
+  workspace, with strut's `conversation/start`. Right after Set up, Code
+  asks strut's `conversation/list { about: <the workspace's ref_id> }`
+  for a few seconds and opens Jamie there (`appLink("strut/jamie", {
+  session })`): the person lands in their chat with the job already
+  running, with no extra click. When no chat turns up (nothing on the box
+  sets workspaces up, or its setup refused), the card says so. Each card
+  links the viewer's chat about its workspace, the newest. Code names no
+  package and starts nothing itself.
 - **Making a workspace is all Code does.** Setting it up is the package's
   that runs workspaces (`stadeum/pods`, on strut's `on: created:
   Workspace`), and a new repository's webhook is its forge package's (`on:
@@ -103,7 +119,7 @@ How it holds together:
   other packages keep on it (pods' `.pod/`, as files on the node) stays,
   and its page takes the new name.
 - **A workspace's page is a Concept, not a field.** The `Workspace` node
-  keeps its `name` and `INCLUDES` links alone. What its systems are and
+  keeps its `name`, Set up's `note` and its `INCLUDES` links alone. What its systems are and
   how they connect is the Concept `<workspace> workspace` (`hive
   workspace`), which `stadeum/pods` writes at the bake, under `Codebase`
   and `Pod`: a Mermaid diagram, the system in words, how to run it. Only a
@@ -117,6 +133,13 @@ How it holds together:
 - **0.6's `main`.** A `Workspace` made by 0.6 or before may carry `main`.
   Nothing reads it, `check` clears it, and the type keeps it declared so
   those nodes read as before.
+
+Finding the chat about a workspace needs strut's `conversation/list
+{ about }`, from a package's page (stakwork/strut#858, `plans/package-seams.md`
+§7). A strut without it refuses a package's page every chat: Code then
+opens no chat and shows no chat link, and says so after Set up. **Do not
+promote 0.8.0 to `stable` until stakwork/strut#858 is merged and
+released.**
 
 It requires no secret of its own, and a strut with the package seams of
 stakwork/strut#851 (`git/repositories` and `git/pull-request`), besides
@@ -197,6 +220,17 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.8.0** Set up lands in a Jamie chat (stadeum's `plans/software.md`
+  rows 26 and 27, §14.4):
+  - Set up, the default's and New workspace's Create, takes optional
+    Additional information, kept on the `Workspace` as `note` (declared
+    on the type, and in the `Repositories` page's contract).
+  - Right after Set up, the app looks for the person's chat about the
+    workspace (strut's `conversation/list { about }`) for a few seconds
+    and opens Jamie there, or the card says no chat turned up.
+  - Each card links the viewer's chat about its workspace.
+  - `repositories` gives each workspace's `ref_id` and `note`.
+  - Needs stakwork/strut#858 for the chat; without it, no chat and no link.
 - **0.7.0** The Code app is about making workspaces (stadeum's
   `plans/software.md` §14.4, revised 2026-11-23):
   - New workspace, from what the viewer's forges reach or by address;
@@ -293,7 +327,12 @@ viewer's forges reach while the box has none, written only at Set up, as
 the person who pressed it, and never by `check`. A workspace
 is renamed in place (the same node, its page renamed) and deleted with
 its page and the repositories in no other; a workspace's page is written
-under `Codebase` as pods writes it at the bake.
+under `Codebase` as pods writes it at the bake. Set up's note is on the
+`Workspace` when a stand-in for pods' `setup` reads it from its `on:
+created: Workspace` run, as the person who pressed it, and never the last
+Set up's on a workspace made again; the Code app's page is granted
+strut's `conversation/list`, and finds no chat on a strut without
+`about` (`apps/code/src/chat.ts`, read by the test as the page reads it).
 
 It reaches github.com, for public repositories. A private one is served
 from the test's own machine over http behind a token, its https address

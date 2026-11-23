@@ -8,7 +8,11 @@ grants:
   # with the suggested default while the box has none; `workspace` makes
   # one or changes its repositories, `default-workspace` is the suggested
   # one's Set up, `rename` and `delete` the rest. Anyone makes and changes
-  # workspaces, each as themselves (steps/_code.ts `refusal`).
-  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete]
+  # workspaces, each as themselves (steps/_code.ts `refusal`). Strut's
+  # `conversation/list { about }` finds the viewer's chat about a workspace,
+  # which whatever sets it up starts: right after Set up the app opens Jamie
+  # there, and each card links it (src/chat.ts). A strut without `about`
+  # (stakwork/strut#858) refuses a package's page, and there is no link.
+  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete, conversation/list]
   sqlite: false
   automations: []

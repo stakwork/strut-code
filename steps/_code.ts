@@ -204,22 +204,14 @@ export function view(list: List) {
 export const CODE_APP = "stadeum/code/code";
 
 /**
- * Who makes and changes workspaces, in this one line. The owner's rule
- * (2026-11-23, stadeum's plans/software.md row 23): "anyone can make a
- * workspace".
- *
- * - `"anyone"`: any person the Code app is shown to, and the
- *   job agent with the `workspace` tool, each as themselves. A repository
- *   goes in only when their own token reads it (its remote is asked as
- *   them), and whatever sets the workspace up runs as them, on their bill.
- * - `"admins"`, kept as the way back: an admin, in the Code app, alone.
- *   The job agent's `workspace` tool is then refused: strut tells a step
- *   about an admin only on a page's call.
- */
-export const MAKERS: "anyone" | "admins" = "anyone";
-
-/**
  * Why this call may not make or change a workspace, or none when it may.
+ *
+ * Anyone may, as themselves (the owner's rule, 2026-11-23, stadeum's
+ * plans/software.md row 23: "anyone can make a workspace"): any person the
+ * Code app is shown to, and the job agent with the `workspace` tool. A
+ * repository goes in only when their own token reads it (its remote is
+ * asked as them), and whatever sets the workspace up runs as them, on
+ * their bill.
  *
  * A page's call must be this package's own Code app: strut's app door names
  * the app from the identity it signed for the page (`ctx.app.name`), and no
@@ -229,12 +221,11 @@ export const MAKERS: "anyone" | "admins" = "anyone";
  * job agent's tool, a workflow) changes them as its person, and a run that
  * is nobody's changes nothing.
  */
-export function refusal(ctx: Ctx, makers: "anyone" | "admins" = MAKERS): string | undefined {
+export function refusal(ctx: Ctx): string | undefined {
   const app = ctx.app;
   if (app && (app.name !== CODE_APP || app.version?.startsWith("preview-"))) {
     return `workspaces are made and changed in the Code app (${CODE_APP}), not from ${app.name === CODE_APP ? "a preview of it" : app.name}`;
   }
-  if (makers === "admins" && app?.admin !== true) return "only an admin makes and changes workspaces, in the Code app";
   if (!person(ctx)) return "a workspace is made as a person, with their own access to its repositories, and this run is nobody's";
   return undefined;
 }

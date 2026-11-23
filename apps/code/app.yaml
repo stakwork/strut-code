@@ -7,9 +7,8 @@ grants:
   # `repositories` reads the workspaces and what the viewer's forges reach,
   # with the suggested default while the box has none; `workspace` makes
   # one or changes its repositories, `default-workspace` is the suggested
-  # one's Set up, `rename` and `delete` the rest. Each change is the
-  # viewer's own, refused to a call that is nobody's (steps/_code.ts
-  # `MAKERS`).
+  # one's Set up, `rename` and `delete` the rest. Anyone makes and changes
+  # workspaces, each as themselves (steps/_code.ts `refusal`).
   steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete]
   sqlite: false
   automations: []

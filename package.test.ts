@@ -149,17 +149,14 @@ describe("an address, a name and the default workspace", () => {
     assert.equal(defaultWorkspace([]), undefined);
   });
 
-  it("lets anyone make workspaces, from the Code app or as the job's person, and never a call that is nobody's (the one switch: admins)", () => {
+  it("lets anyone make workspaces, from the Code app or as the job's person, and never from another app or a call that is nobody's", () => {
     const code = { name: APP, version: "1" };
     assert.equal(refusal({ app: code, actor: "ada" }), undefined, "a person in the Code app");
+    assert.equal(refusal({ app: { ...code, admin: true }, actor: "root" }), undefined, "an admin too");
     assert.equal(refusal({ actor: "ada", principal: "ada" }), undefined, "the job agent, as its person");
     assert.match(refusal({ app: { name: OTHER_APP }, actor: "ada" }) ?? "", /made and changed in the Code app \(stadeum\/code\/code\), not from acme\/other\/console/);
     assert.match(refusal({ app: { name: APP, version: "preview-3" }, actor: "ada" }) ?? "", /not from a preview of it/);
     assert.match(refusal({}) ?? "", /made as a person/);
-    // Admins alone: their call in the Code app, nobody else's, and no job's.
-    assert.equal(refusal({ app: { ...code, admin: true }, actor: "root" }, "admins"), undefined);
-    assert.match(refusal({ app: code, actor: "ada" }, "admins") ?? "", /only an admin/);
-    assert.match(refusal({ actor: "ada", principal: "ada" }, "admins") ?? "", /only an admin/);
   });
 
   it("says from strut's error what a person can act on, and whose access is missing", () => {

@@ -40,10 +40,7 @@ How it holds together:
   is asked for at its remote as that person first, so only one their own
   token reads goes in, and a refusal changes nothing. Whatever sets the
   workspace up runs as them too. The owner's rule (2026-11-23: *"anyone
-  can make a workspace"*). It is one line, `MAKERS` in `steps/_code.ts`:
-  `"anyone"` or `"admins"` (an admin, in the Code app, alone; the job
-  agent's tool then refuses, as strut tells a step about an admin only on
-  a page's call).
+  can make a workspace"*).
 - **Only the Code app, or no page.** Strut's app door names a page's app
   from the identity it signed for the page (`ctx.app.name`). Any app may
   list these steps among its grants, so a change from another app, or a
@@ -205,7 +202,7 @@ pull request could be opened. This package names no forge.
   - New workspace, from what the viewer's forges reach or by address;
     add, take out, rename and delete on each workspace's card. Add a
     repository, Workspaces… and Make main are gone.
-  - Anyone makes workspaces, as themselves (the owner's rule; `MAKERS`).
+  - Anyone makes workspaces, as themselves (the owner's rule).
   - A workspace has no main repository. A repository is the box's while
     it is in a workspace.
   - While the box has no workspace, the Code app suggests the default

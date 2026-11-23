@@ -61,10 +61,16 @@ A workspace never set up (the claim gives a bare pod, with no image) is
 set up on the way, as the `Pod` page says. Its `.pod/` goes in a pull
 request of its own, then the change in another. Say so in `text`.
 
-No pod (no `stadeum_pods_claim` among your tools, or the claim fails):
-make the change in a checkout as in 3, and say plainly in `text` that
-nothing was run here, no app and no tests, and why. The pull request's
-checks (6) are then what runs it.
+A tool the build needs that the pod can run (a Rust toolchain for one
+crate of a Node app) goes in the workspace's image, not this job's shell:
+`.pod/`'s `Dockerfile`, then bake, as the `Pod` page says, so every later
+job has it.
+
+No pod (no `stadeum_pods_claim` among your tools, or the claim fails), or
+an app a pod doesn't run (a phone app; a platform or an architecture the
+pod lacks): make the change in a checkout as in 3. Build no platform for
+it here. Say plainly in `text` what wasn't run and why. The pull
+request's checks (6) are then what runs it.
 
 ## 5. How it ends
 

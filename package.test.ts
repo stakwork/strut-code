@@ -553,7 +553,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.8.0");
+    assert.equal(pkg.version, "0.8.1");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(job.params.tools.includes(t), `the job agent is granted ${t}`);

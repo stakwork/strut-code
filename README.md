@@ -105,12 +105,14 @@ How it holds together:
   package (`stadeum/pods`) starts a Jamie chat of the person's `about` the
   workspace, with strut's `conversation/start`. Right after Set up, Code
   asks strut's `conversation/list { about: <the workspace's ref_id> }`
-  for a few seconds and opens Jamie there (`appLink("strut/jamie", {
-  session })`): the person lands in their chat with the job already
+  for a few seconds and opens Jamie there, as the page rather than in
+  the host's side panel (`appLink("strut/jamie", { session }, { open:
+  "page" })`): the person lands in their chat with the job already
   running, with no extra click. When no chat turns up (nothing on the box
   sets workspaces up, or its setup refused), the card says so. Each card
-  links the viewer's chat about its workspace, the newest. Code names no
-  package and starts nothing itself.
+  links the viewer's chat about its workspace, the newest, and opens Jamie
+  the same way; its link to the workspace's page in Knowledge opens
+  beside. Code names no package and starts nothing itself.
 - **Making a workspace is all Code does.** Setting it up is the package's
   that runs workspaces (`stadeum/pods`, on strut's `on: created:
   Workspace`), and a new repository's webhook is its forge package's (`on:
@@ -220,6 +222,10 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.8.1** The links to a workspace's chat, right after Set up and on its
+  card, open Jamie as the page, not in the host's side panel (`appLink`'s
+  `open: "page"`, from strut's kit). On a strut whose kit has no `open`,
+  they open beside, as in 0.8.0.
 - **0.8.0** Set up lands in a Jamie chat (stadeum's `plans/software.md`
   rows 26 and 27, §14.4):
   - Set up, the default's and New workspace's Create, takes optional

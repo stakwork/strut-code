@@ -161,7 +161,9 @@ export default function App() {
     })),
   });
   const chatOf = new Map((data?.workspaces ?? []).map((w, i) => [w.ref_id, chats[i]?.data]));
-  const openChat = (session: string) => void host.openLink(appLink(JAMIE, { session }));
+  // Jamie as the page, not in the host's side panel (`open: "page"`): the
+  // jump right after Set up and each card's link to its chat.
+  const openChat = (session: string) => void host.openLink(appLink(JAMIE, { session }, { open: "page" }));
   const [looking, setLooking] = useState<Record<string, Looking>>({});
 
   /**

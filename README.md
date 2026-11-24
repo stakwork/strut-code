@@ -162,10 +162,17 @@ it acts:
 
 1. **Find the repository** with `repositories`: in a workspace, among what
    the person's accounts reach, or by the address they gave. With several
-   and none named, it asks.
-2. **Small or deeper.** One test: can a person tell whether the change is
-   right from its diff alone? A colour, a size, a label or wording is
-   small. Anything only running it can judge is deeper.
+   and none named, it asks. It calls it even when the launch already
+   checked the repositories out, since a deeper change picks its
+   workspace from it.
+2. **Small or deeper**, decided before the work is planned, since it
+   decides where the work runs. One test: can a person tell whether the
+   change is right from its diff alone? A colour, a size, a label or
+   wording is small. Anything only running it can judge is deeper. A
+   checkout in the job's directory installs, builds and tests nothing,
+   and a brief that says to run the tests says what to run, not where
+   (2026-11-23: a job on the stakwork box ran `yarn install` in strut's
+   own container, its brief from the chat turn saying to run the tests).
 3. **A small change needs no pod, no tests and no workspace** (the
    owner's rule, as Hive works): `git_checkout` into the job's directory,
    the edit, then `git_push` from the absolute path the checkout returned,

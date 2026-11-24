@@ -10,24 +10,27 @@ they review it there.
 
 ## 1. Find the repository
 
-Call `stadeum_code_repositories`. It gives the box's workspaces, each
-with its `repositories`, and `reachable`: every repository the person's
-own accounts reach. Take the one the person means: in a workspace, in
-`reachable`, or the https address they gave. When they named none and
-several fit, ask before anything else. A repository none of these has,
-and no address for it, is one this box can't reach as them: say so, and
-that they connect the account that reads it.
+Call `stadeum_code_repositories`, even when repositories are already
+checked out in your directory: a deeper change (4) picks its workspace
+from it. It gives the box's workspaces, each with its `repositories`,
+and `reachable`: every repository the person's own accounts reach. Take
+the one the person means: in a workspace, in `reachable`, or the https
+address they gave. When they named none and several fit, ask before
+anything else. A repository none of these has, and no address for it,
+is one this box can't reach as them: say so, and that they connect the
+account that reads it.
 
 ## 2. Small or deeper
 
-One test: can a person tell whether the change is right from its diff
-alone?
+Decide this first: it decides where the work runs. One test: can a
+person tell whether the change is right from its diff alone?
 
 - **Small:** yes. A colour, a size, a label, wording, a constant, in one
   place or two. No pod, no tests.
 - **Deeper:** anything only running it can judge: behaviour, logic, data,
   a dependency, the build, a change across several files or areas. It
-  goes on a pod, where the app and its tests run. A detailed request is
+  goes on a pod, where the app and its tests run, never a checkout in
+  your directory, whatever the message asks. A detailed request is
   still deeper.
 
 ## 3. A small change, in a checkout

@@ -441,7 +441,7 @@ function PickDialog(props: { workspace?: Workspace; address?: string; busy: bool
         <DialogHeader>
           <DialogTitle>{workspace ? `Add repositories to ${workspace.name}` : "New workspace"}</DialogTitle>
           <DialogDescription>
-            {workspace ? "Each one goes in only when your own account reads it." : "Its repositories, worked on together. Jamie sets it up and bakes it, as you, in a chat of yours that opens here, where the box runs workspaces."}
+            {workspace ? "Each one goes in only when your own account reads it." : "A set of repositories to work on"}
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-3">
@@ -524,7 +524,7 @@ function NoteField({ value, onChange }: { value: string; onChange: (v: string) =
       <Label htmlFor="workspace-note">
         Additional information <span className="font-normal text-muted-foreground">(optional)</span>
       </Label>
-      <Textarea id="workspace-note" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Anything Jamie should know to set it up, such as: the UI is strut; peel is for reference" className="max-h-48" />
+      <Textarea id="workspace-note" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Any extra information for Jamie, such as which repo to serve the frontend from" className="max-h-48" />
       {over && <p className="text-xs text-destructive">At most {NOTE_MOST.toLocaleString()} characters: this is {value.trim().length.toLocaleString()}.</p>}
     </div>
   );

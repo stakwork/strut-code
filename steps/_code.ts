@@ -25,6 +25,9 @@ export const pageName = (workspace: string) => `${workspace} workspace`;
 /** The most repositories one call puts in a workspace. */
 export const MOST = 50;
 
+/** The longest `note` a workspace's Set up takes, in characters. */
+export const NOTE_MOST = 4000;
+
 interface StepDef {
   input: { parse(v: unknown): unknown };
   run(cfg: unknown, ctx: unknown): Promise<unknown>;
@@ -106,6 +109,9 @@ export interface Space {
   repositories: string[];
   /** Its page, when it has been baked: the Concept `<name> workspace`. */
   page?: { name: string; ref_id: string };
+  /** What the person who set it up wrote in Set up's "Additional
+   *  information", for whatever sets it up to read. */
+  note?: string;
   /** It still carries `main`, which 0.6 and before wrote: `check` clears it. */
   oldMain?: true;
 }
@@ -155,11 +161,13 @@ export async function readList(ctx: Ctx): Promise<List> {
     .map((n): Space => {
       const name = text(n.properties["name"]) ?? "";
       const page = pages.get(pageName(name));
+      const note = text(n.properties["note"]);
       return {
         ref_id: n.ref_id,
         name,
         repositories: [...(members.get(n.ref_id) ?? [])].sort(byName),
         ...(page ? { page: { name: pageName(name), ref_id: page } } : {}),
+        ...(note ? { note } : {}),
         ...(text(n.properties["main"]) ? { oldMain: true as const } : {}),
       };
     })
@@ -188,14 +196,26 @@ export async function findRepository(ctx: Ctx, url: string): Promise<Repo | unde
   return nodes[0] ? toRepo(nodes[0]) : undefined;
 }
 
-/** The list as a reader is given it: no ids of its own nodes, each
- *  repository with its workspaces. A workspace's page keeps its ref_id:
- *  the Knowledge app opens a page by it. */
+/** The list as a reader is given it: each repository with its workspaces,
+ *  and no repository's node id. A workspace keeps its ref_id, as its page
+ *  does: a chat is about the workspace's node (strut's `conversation/list
+ *  { about }`), and the Knowledge app opens a page by its node. */
 export function view(list: List) {
   return {
     repositories: list.repositories.map(({ ref_id: _ref, ...r }) => ({ ...r, workspaces: list.workspaces.filter((w) => w.repositories.includes(r.url)).map((w) => w.name) })),
-    workspaces: list.workspaces.map(({ ref_id: _ref, oldMain: _main, ...w }) => w),
+    workspaces: list.workspaces.map(({ oldMain: _main, ...w }) => w),
   };
+}
+
+/** Set up's "Additional information" as it is kept: trimmed, none when
+ *  empty, refused over NOTE_MOST characters. Line breaks stay: it is the
+ *  person's own words, which whatever sets the workspace up reads. */
+export function noteOf(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") throw new Error("a workspace's note is text");
+  const note = raw.replace(/\r\n?/g, "\n").trim();
+  if (note.length > NOTE_MOST) throw new Error(`the additional information is ${note.length} characters: at most ${NOTE_MOST} go on a workspace`);
+  return note || undefined;
 }
 
 // ── who may make and change workspaces ────────────────────────────────────
@@ -565,6 +585,10 @@ export interface Change {
   remove?: unknown[];
   /** Only make it: refuse when a workspace has this name. */
   create?: boolean;
+  /** Set up's "Additional information": on the node from its making, so
+   *  whatever sets it up (`on: created: Workspace`) reads it there. Only
+   *  when it is made. */
+  note?: unknown;
   /** A repository its person's token can't read is left out, not refused
    *  (the default workspace, from what a forge said it reaches). */
   skipRefused?: boolean;
@@ -585,10 +609,12 @@ export async function changeWorkspace(ctx: Ctx, change: Change) {
   if (put.length > MOST) throw new Error(`at most ${MOST} repositories go in a workspace at once`);
   const both = put.filter((a) => out.includes(a.url));
   if (both.length) throw new Error(`${both[0]!.url} is both put in and taken out: say one`);
+  const note = noteOf(change.note);
 
   const list = await readList(ctx);
   const space = list.workspaces.find((w) => w.name === name);
   if (space && change.create) throw new Error(`there is a workspace ${name} already: pick another name, or add to it`);
+  if (space && note) throw new Error(`${name} is made already: additional information goes on a workspace when it is made`);
   if (!space && out.length) throw new Error(`there is no workspace ${name} to take repositories out of`);
   if (!space && !put.length) throw new Error(`a workspace holds one repository at least: name one to make ${name} with`);
   const holds = new Set(space?.repositories ?? []);
@@ -614,14 +640,19 @@ export async function changeWorkspace(ctx: Ctx, change: Change) {
   let ref = space?.ref_id;
   const created = !space;
   if (!ref) {
-    const made = await graph<Written>(ctx, "create-node", { node_type: WORKSPACE, node_data: { name } });
+    // The note in the node's first write: `on: created: Workspace` reads it there.
+    const made = await graph<Written>(ctx, "create-node", { node_type: WORKSPACE, node_data: { name, ...(note ? { note } : {}) } });
     if (made.status === "Warning") {
       const other = list.workspaces.find((w) => w.ref_id === made.ref_id);
       throw new Error(`"${name}" can't be a workspace beside "${other?.name ?? "another"}": strut's graph keys the two names alike`);
     }
     ref = made.ref_id;
-    // One deleted before comes back as new: without 0.6's `main`.
-    if (made.messages?.some((m) => /restored/i.test(m))) await graph(ctx, "edit-node", { ref_id: ref, properties_to_be_deleted: ["main"] }).catch(() => undefined);
+    // One deleted before comes back as new: without 0.6's `main`, and with
+    // this Set up's note, not the last one's.
+    if (made.messages?.some((m) => /restored/i.test(m))) {
+      await graph(ctx, "edit-node", { ref_id: ref, properties_to_be_deleted: note ? ["main"] : ["main", "note"] }).catch(() => undefined);
+      if (note) await graph(ctx, "edit-node", { ref_id: ref, node_data: { note } });
+    }
   }
   const already = space ? holds : await membersOf(ctx, ref, list.repositories);
   const fresh: string[] = [];
@@ -709,9 +740,11 @@ export function suggestion(list: List, reached: Reached): { name: string; reposi
  * (the owner's rule: "default waits for Set up"). Worked out again from
  * what their own forges reach now, so it is theirs; a repository whose
  * remote refuses them is left out. Refused once the box has a workspace:
- * another is made with New workspace.
+ * another is made with New workspace. `note` is Set up's "Additional
+ * information", written on the workspace as it is made.
  */
-export async function setUpDefault(ctx: Ctx) {
+export async function setUpDefault(ctx: Ctx, note?: unknown) {
+  const kept = noteOf(note);
   const list = await readList(ctx);
   if (list.workspaces.length) throw new Error("the box has a workspace already: make another with New workspace");
   const reached = await reach(ctx);
@@ -720,7 +753,7 @@ export async function setUpDefault(ctx: Ctx) {
     const why = reached.problem ?? reached.hosts.map((h) => (h.problem ? `${h.host}: ${h.problem}` : "")).filter(Boolean).join("; ");
     throw new Error(`your accounts reach no repository to set up${why ? ` (${why})` : ""}: make a workspace by address with New workspace`);
   }
-  const made = await changeWorkspace(ctx, { name: choice.name, repositories: choice.repositories, create: true, skipRefused: true });
+  const made = await changeWorkspace(ctx, { name: choice.name, repositories: choice.repositories, create: true, skipRefused: true, note: kept });
   return { workspace: made.workspace, repositories: made.repositories, ...(made.skipped ? { skipped: made.skipped } : {}) };
 }
 

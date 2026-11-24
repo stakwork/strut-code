@@ -5,8 +5,9 @@ export default defineStep({
   type: "stadeum/code/repositories",
   description:
     "The box's workspaces and their repositories, and what each forge's token reaches as you. " +
-    "Each workspace: its `name` (what a pod is claimed for), its `repositories`' urls, and its `page` once it has been baked: " +
-    "the Concept `<name> workspace`, a diagram of its systems and how they connect, the system in words and how to run it. " +
+    "Each workspace: its `name` (what a pod is claimed for), its `repositories`' urls, its `page` once it has been baked: " +
+    "the Concept `<name> workspace`, a diagram of its systems and how they connect, the system in words and how to run it; " +
+    "and its `note`, what the person who set it up wrote for its setup. " +
     "Each repository the box holds: its https `url`, `name`, default `branch`, the `head` commit last seen on it, when it was `checked`, the commit last `ingested`, " +
     "a `problem` when its last check failed, and the `workspaces` it is in. " +
     "`reachable`: every repository the forges' tokens reach as you (strut's git/repositories), whether or not the box holds it, each with its `url`, `name`, " +
@@ -32,8 +33,10 @@ export default defineStep({
     ),
     workspaces: z.array(
       z.object({
+        ref_id: z.string().describe("The workspace's node: what a chat about it is about"),
         name: z.string(),
         repositories: z.array(z.string()),
+        note: z.string().optional().describe("What the person who set it up wrote in Set up's Additional information"),
         page: z.object({ name: z.string(), ref_id: z.string() }).optional().describe("Its page, the Concept `<name> workspace`: absent until the workspace is baked."),
       }),
     ),

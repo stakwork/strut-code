@@ -1,5 +1,5 @@
 import { z, defineStep } from "strut";
-import { asCtx, changeWorkspace, MOST, requireMaker } from "./_code.js";
+import { asCtx, changeWorkspace, MOST, NOTE_MOST, requireMaker } from "./_code.js";
 
 const url = z.string().describe("A repository's https address, such as https://github.com/acme/app");
 
@@ -11,7 +11,7 @@ export default defineStep({
     "(its workspaces' repositories, or what the forges `reachable` lists), or any address, public or private. Each is asked for at its remote as you, " +
     "so only one your own account reads goes in, and a refusal changes nothing. With no workspace of that name it is made; with one it gains them. " +
     "`remove` takes repositories out; one in no workspace after leaves the box. A workspace keeps one repository at least. " +
-    "Making one may start its setup (the package that runs workspaces does that, as you). " +
+    "Making one may start its setup (the package that runs workspaces does that, as you); `note` goes on it as it is made, for that setup to read. " +
     "Answers its `repositories`, which were `added` and `removed`, which are `new` to the box, and which `left` it.",
   effect: "write",
   input: z.object({
@@ -19,6 +19,10 @@ export default defineStep({
     repositories: z.array(url).max(MOST).optional().describe("Repositories to put in it. Making a workspace needs one at least"),
     remove: z.array(url).optional().describe("Repositories to take out of it"),
     create: z.boolean().optional().describe("Only make it: refuse when a workspace has this name already"),
+    note: z
+      .string()
+      .optional()
+      .describe(`Only when making it: what the person knows that its setup should, in their words (the Code app's "Additional information"), at most ${NOTE_MOST} characters`),
   }),
   output: z.object({
     workspace: z.string(),
@@ -32,7 +36,7 @@ export default defineStep({
   async run(cfg, ctx) {
     const c = asCtx(ctx);
     requireMaker(c);
-    const { skipped: _none, ...out } = await changeWorkspace(c, { name: cfg.name, repositories: cfg.repositories ?? [], remove: cfg.remove ?? [], create: cfg.create === true });
+    const { skipped: _none, ...out } = await changeWorkspace(c, { name: cfg.name, repositories: cfg.repositories ?? [], remove: cfg.remove ?? [], create: cfg.create === true, note: cfg.note });
     return out;
   },
 });

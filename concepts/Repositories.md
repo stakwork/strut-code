@@ -57,6 +57,7 @@ Keyed by `name`.
 | Field | Holds |
 | --- | --- |
 | `name` | Lowercase letters, digits, `.`, `_` and `-`, at most 63, starting with a letter or a digit: what a pod is claimed for. |
+| `note` | What the person who made it wrote in Set up's "Additional information", in their own words, such as "the UI is strut; peel is for reference": trimmed, at most 4,000 characters. It is on the node from its first write, so a workflow run on `on: created: Workspace` reads it there. Written only when the workspace is made, and absent when they wrote nothing. |
 
 A workspace has no main repository. What runs it is its own setup, kept
 on the node by the package that runs workspaces, not any one
@@ -66,6 +67,16 @@ means nothing now, and `check` clears it.
 A workspace renamed in the Code app stays the same node (its `ref_id`),
 so what is kept on it stays. A reader that keeps a workspace's name
 finds it by its `ref_id` after a rename.
+
+### A workspace's chat
+
+Whatever sets a workspace up for the person who made it shows its work
+in a Jamie chat of theirs `about` the workspace's node: strut's
+`conversation/start { message, job, about: <ref_id> }`. Right after Set
+up, the Code app asks strut for that person's chat about the workspace
+(`conversation/list { about }`) for a few seconds and opens Jamie there,
+and each workspace's card links to the newest one. A setup started some
+other way, or none, shows no chat, and the Code app says so.
 
 ### The link
 
@@ -91,7 +102,7 @@ A workspace never baked has none, so a page is also how a reader tells a
 baked workspace from one never set up.
 
 It is a page, not a field on the `Workspace` node, which keeps only its
-`name` and its `INCLUDES` links. A page carries claims, cases and tests,
+`name`, Set up's `note` and its `INCLUDES` links. A page carries claims, cases and tests,
 and the history keeps each edit with the run that made it. It is not
 named with the bare name, which is a repository's page.
 

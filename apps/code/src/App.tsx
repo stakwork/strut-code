@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { appLink, useHost, useStrutClient, useToolInput } from "@strut/kit";
-import { BookOpen, FolderGit2, GitBranch, Lock, MessageSquare, MoreHorizontal, Plus, X } from "lucide-react";
+import { BookOpen, FileCode, FolderGit2, GitBranch, Lock, MessageSquare, MoreHorizontal, Plus, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -21,8 +21,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { chatAbout, JAMIE, lookForChat, type Found } from "./chat";
+import { foldersOn, ordered, readFolder, shown, type Folder, type Folders } from "./files";
 import { addressToAdd } from "./input";
 
 // The package's steps, by their full names.
@@ -96,7 +98,7 @@ const NOTE_MOST = 4000;
 type Looking = "looking" | "none" | "unsupported";
 
 /** What a dialog is open on: the suggested workspace's Set up, a new workspace, or one to add to, rename or delete. */
-type Open = { kind: "setup"; suggested: { name: string; repositories: string[] } } | { kind: "new"; address?: string } | { kind: "add"; workspace: Workspace } | { kind: "rename"; workspace: Workspace } | { kind: "delete"; workspace: Workspace } | { kind: "take"; workspace: Workspace; repository: Repository };
+type Open = { kind: "setup"; suggested: { name: string; repositories: string[] } } | { kind: "new"; address?: string } | { kind: "add"; workspace: Workspace } | { kind: "rename"; workspace: Workspace } | { kind: "delete"; workspace: Workspace } | { kind: "take"; workspace: Workspace; repository: Repository } | { kind: "files"; workspace: Workspace; folders: Folder[] };
 
 export default function App() {
   const client = useStrutClient();
@@ -161,6 +163,24 @@ export default function App() {
     })),
   });
   const chatOf = new Map((data?.workspaces ?? []).map((w, i) => [w.ref_id, chats[i]?.data]));
+  // The files packages keep on each workspace's node, such as its setup
+  // (strut's node/files, ./files.ts). None on a strut that can't say, which
+  // is then asked no more.
+  const files = useQueries({
+    queries: (data?.workspaces ?? []).map((w) => ({
+      queryKey: ["code", "files", w.ref_id],
+      queryFn: () => foldersOn(run, w.ref_id),
+      staleTime: 10_000,
+      retry: false,
+      refetchInterval: (q: { state: { data?: Folders } }) => (q.state.data && "unsupported" in q.state.data ? false : 60_000),
+    })),
+  });
+  const foldersOf = new Map(
+    (data?.workspaces ?? []).map((w, i) => {
+      const found = files[i]?.data;
+      return [w.ref_id, found && "folders" in found ? found.folders : []];
+    }),
+  );
   // Jamie as the page, not in the host's side panel (`open: "page"`): the
   // jump right after Set up and each card's link to its chat.
   const openChat = (session: string) => void host.openLink(appLink(JAMIE, { session }, { open: "page" }));
@@ -266,6 +286,12 @@ export default function App() {
                   its page
                 </Button>
               )}
+              {!!foldersOf.get(w.ref_id)?.length && (
+                <Button variant="link" size="sm" className="h-auto gap-1 p-0" title="Its files, such as its setup" onClick={() => setOpen({ kind: "files", workspace: w, folders: foldersOf.get(w.ref_id)! })}>
+                  <FileCode className="size-3.5" />
+                  its files
+                </Button>
+              )}
               {may && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -345,6 +371,8 @@ export default function App() {
           }
         />
       )}
+
+      {open?.kind === "files" && <FilesDialog workspace={open.workspace} folders={open.folders} onClose={close} />}
 
       {open?.kind === "rename" && <RenameDialog workspace={open.workspace} busy={busy} onClose={close} onSave={(name) => done(() => client.run(RENAME, { workspace: open.workspace.name, name }))} />}
 
@@ -589,6 +617,88 @@ function RenameDialog({ workspace, busy, onClose, onSave }: { workspace: Workspa
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** When a version was written, in the viewer's words. */
+const when = (iso: string) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "");
+
+/**
+ * A workspace's files: each package's folder on its node, at a version
+ * (the newest first), one file at a time. Read only.
+ */
+function FilesDialog({ workspace, folders, onClose }: { workspace: Workspace; folders: Folder[]; onClose: () => void }) {
+  const client = useStrutClient();
+  const run = (type: string, config: Record<string, unknown>) => client.run(type, config);
+  const [pkg, setPkg] = useState(folders[0]!.package);
+  const folder = folders.find((f) => f.package === pkg) ?? folders[0]!;
+  const [version, setVersion] = useState(folder.versions[0]!.version);
+  const [path, setPath] = useState<string>();
+  // A version once written never changes.
+  const read = useQuery({ queryKey: ["code", "files", workspace.ref_id, folder.package, version], queryFn: () => readFolder(run, workspace.ref_id, folder.package, version), staleTime: Infinity });
+  const paths = ordered(Object.keys(read.data?.files ?? {}));
+  const at = path && paths.includes(path) ? path : paths[0];
+  const file = at !== undefined ? shown(read.data?.files[at]) : undefined;
+  const pickFolder = (p: string) => {
+    setPkg(p);
+    setVersion((folders.find((f) => f.package === p) ?? folders[0]!).versions[0]!.version);
+    setPath(undefined);
+  };
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Files for {workspace.name}</DialogTitle>
+          <DialogDescription>{folders.length > 1 ? "Kept by the packages that work on it" : `Kept by ${folder.package}`}</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          {folders.length > 1 && (
+            <NativeSelect size="sm" value={folder.package} onChange={(e) => pickFolder(e.target.value)} aria-label="Whose files">
+              {folders.map((f) => (
+                <NativeSelectOption key={f.package} value={f.package}>
+                  {f.package}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+          {folder.versions.length > 1 ? (
+            <NativeSelect size="sm" value={String(version)} onChange={(e) => setVersion(Number(e.target.value))} aria-label="Which version">
+              {folder.versions.map((v, i) => (
+                <NativeSelectOption key={v.version} value={String(v.version)}>
+                  Version {v.version} · {when(v.at)}
+                  {i === 0 ? " (latest)" : ""}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              Version {version} · {when(folder.versions[0]!.at)}
+            </span>
+          )}
+        </div>
+        {/* One height whatever the file, so the dialog stays put. */}
+        <div className="grid min-w-0 gap-3 sm:h-[min(60vh,32rem)] sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+          <nav className="flex max-h-32 flex-col overflow-y-auto sm:max-h-none" aria-label="Files">
+            {paths.map((p) => (
+              <Button key={p} variant={p === at ? "secondary" : "ghost"} size="sm" className="h-7 w-full shrink-0 justify-start font-mono text-xs" title={p} onClick={() => setPath(p)}>
+                <span className="truncate">{p}</span>
+              </Button>
+            ))}
+          </nav>
+          <div className="h-[50vh] min-w-0 overflow-auto rounded-md border bg-muted/40 sm:h-auto">
+            {read.error ? (
+              <p className="p-3 text-sm text-destructive">{message(read.error)}</p>
+            ) : read.isLoading ? (
+              <p className="p-3 text-sm text-muted-foreground">Reading the files…</p>
+            ) : file && "text" in file ? (
+              <pre className="p-3 font-mono text-xs">{file.text}</pre>
+            ) : file ? (
+              <p className="p-3 text-sm text-muted-foreground">Not text: {file.bytes.toLocaleString()} bytes.</p>
+            ) : null}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

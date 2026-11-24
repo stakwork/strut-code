@@ -20,7 +20,7 @@ secret.
 | `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, a workspace's page) |
 | `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
 | `concepts/Codebase.md` | The `Codebase` page, a root: short, and it stays as it is. Under it go a page for each workspace that has been baked, and later a page for each repository and each feature |
-| `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, a link to its page once it is baked, and a link to the viewer's chat about it. **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. It and the suggested default's **Set up** take optional **Additional information**, and right after either the app opens Jamie in the chat about the new workspace (`src/chat.ts`). A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
+| `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, a link to its page once it is baked, a link to the viewer's chat about it, and its files, such as its setup, once a package keeps some on it (`src/files.ts`). **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. It and the suggested default's **Set up** take optional **Additional information**, and right after either the app opens Jamie in the chat about the new workspace (`src/chat.ts`). A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
 | `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested. It writes no workspace |
 | `workflows/ingest.yaml` | Takes a repository in at its head. Today it only records the commit: a parser plugs in here, before `record` |
 | `steps/repositories.ts` | The job agent's tool and the app's read: the workspaces and their repositories, each workspace's page, and what the forges reach as the caller |
@@ -113,6 +113,19 @@ How it holds together:
   links the viewer's chat about its workspace, the newest, and opens Jamie
   the same way; its link to the workspace's page in Knowledge opens
   beside. Code names no package and starts nothing itself.
+- **A workspace's files are shown, never written.** What packages keep
+  on a `Workspace` node (strut's files on a node, stakwork/strut#851), such
+  as the setup `stadeum/pods` keeps there (`.pod/`: its Dockerfile,
+  compose file and scripts, a version at each bake), Code reads with
+  strut's `node/files`: `list: true` for every package's folder on the
+  node, then one folder at one version. A card links **its files** when
+  some folder's newest version has any; the dialog shows each folder by
+  its package, each version with files (newest first) and each file's
+  text, or its size when it isn't text. A folder whose newest version is
+  empty keeps nothing now (pods writes one for a workspace made again) and
+  isn't shown. Code names no package here, and its page is granted no
+  `node/write-files`: a change to the setup is the setup's own, in its
+  chat.
 - **Making a workspace is all Code does.** Setting it up is the package's
   that runs workspaces (`stadeum/pods`, on strut's `on: created:
   Workspace`), and a new repository's webhook is its forge package's (`on:
@@ -229,6 +242,9 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.9.0** Each workspace's card links **its files**: what packages keep
+  on its node, such as its setup (pods' `.pod/`), each version, read only
+  (strut's `node/files`, granted to the Code app's page).
 - **0.8.1** The links to a workspace's chat, right after Set up and on its
   card, open Jamie as the page, not in the host's side panel (`appLink`'s
   `open: "page"`, from strut's kit). On a strut whose kit has no `open`,
@@ -346,6 +362,9 @@ created: Workspace` run, as the person who pressed it, and never the last
 Set up's on a workspace made again; the Code app's page is granted
 strut's `conversation/list`, and finds no chat on a strut without
 `about` (`apps/code/src/chat.ts`, read by the test as the page reads it).
+It reads the files another package keeps on a workspace's node, each
+version, through strut's `node/files` as the page does
+(`apps/code/src/files.ts`), and is refused `node/write-files`.
 
 It reaches github.com, for public repositories. A private one is served
 from the test's own machine over http behind a token, its https address

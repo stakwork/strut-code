@@ -41,6 +41,7 @@ import { pathToFileURL } from "node:url";
 import { address, askRemote, defaultWorkspace, noteOf, reach, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
 import { addressToAdd } from "./apps/code/src/input.ts";
 import { chatAbout, lookForChat } from "./apps/code/src/chat.ts";
+import { foldersOn, ordered, readFolder, shown } from "./apps/code/src/files.ts";
 
 const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
 // Nobody's token: not this machine's, not its git's. github.com is read with none.
@@ -245,6 +246,49 @@ describe("an address, a name and the default workspace", () => {
     };
     assert.ok("unsupported" in (await lookForChat(refused, "ws", clock)));
     assert.equal(calls, 1);
+  });
+
+  it("reads the files packages keep on a workspace's node, each folder's versions with files, newest first, and none on a strut that can't say", async () => {
+    const asked: Array<Record<string, unknown>> = [];
+    const answering = (out: unknown) => async (type: string, config: Record<string, unknown>) => {
+      assert.equal(type, "node/files");
+      asked.push(config);
+      if (out instanceof Error) throw out;
+      return out;
+    };
+    const v = (pkg: string, version: number, paths: string[], note?: string) => ({ package: pkg, version, at: `2026-11-2${version}T00:00:00.000Z`, bytes: paths.length * 10, paths, ...(note ? { note } : {}) });
+    const listed = { versions: [v("stadeum/pods", 3, ["Dockerfile", "setup.sh"], "baked"), v("stadeum/pods", 1, ["Dockerfile"]), v("stadeum/pods", 2, []), v("acme/gone", 2, []), v("acme/gone", 1, ["x"]), v("acme/docs", 1, ["README.md"])] };
+    assert.deepEqual(await foldersOn(answering(listed), "ws"), {
+      folders: [
+        { package: "acme/docs", versions: [{ version: 1, at: "2026-11-21T00:00:00.000Z", bytes: 10, paths: ["README.md"] }] },
+        {
+          package: "stadeum/pods",
+          versions: [
+            { version: 3, at: "2026-11-23T00:00:00.000Z", bytes: 20, paths: ["Dockerfile", "setup.sh"], note: "baked" },
+            { version: 1, at: "2026-11-21T00:00:00.000Z", bytes: 10, paths: ["Dockerfile"] },
+          ],
+        },
+      ],
+    }, "by package; an empty version left out, and a folder whose newest is empty keeps nothing now");
+    assert.deepEqual(asked.at(-1), { ref_id: "ws", list: true });
+    assert.deepEqual(await foldersOn(answering({ versions: [] }), "ws"), { folders: [] });
+    // A strut without the seam, or one that refuses the page: it can't say.
+    const refused = await foldersOn(answering(new Error("node/files is not granted to stadeum/code/code")), "ws");
+    assert.match("unsupported" in refused ? refused.unsupported : "", /not granted/);
+    assert.ok("unsupported" in (await foldersOn(answering({ package: "strut", version: null, files: {} }), "ws")));
+
+    const files = { Dockerfile: "FROM node:22\n", "bin/logo.png": { base64: "iVBORw==" } };
+    assert.deepEqual(await readFolder(answering({ package: "stadeum/pods", version: 3, at: "t", note: "baked", files }), "ws", "stadeum/pods"), { package: "stadeum/pods", version: 3, at: "t", note: "baked", files });
+    assert.deepEqual(asked.at(-1), { ref_id: "ws", package: "stadeum/pods" }, "the newest");
+    await readFolder(answering({ package: "stadeum/pods", version: 1, at: "t", files: {} }), "ws", "stadeum/pods", 1);
+    assert.deepEqual(asked.at(-1), { ref_id: "ws", package: "stadeum/pods", version: 1 });
+    await assert.rejects(readFolder(answering({ package: "stadeum/pods", version: null, files: {} }), "ws", "stadeum/pods"), /stadeum\/pods keeps no files on it/);
+    await assert.rejects(readFolder(answering(new Error("node_not_found: x")), "ws", "stadeum/pods"), /node_not_found/);
+
+    assert.deepEqual(shown("FROM node:22\n"), { text: "FROM node:22\n" });
+    assert.deepEqual(shown({ base64: "iVBORw==" }), { bytes: 4 });
+    assert.deepEqual(shown({ base64: "iVBORw0K" }), { bytes: 6 });
+    assert.deepEqual(ordered(["scripts/z.sh", "setup.sh", "Dockerfile", "a/b/c", "docker-compose.yml"]), ["docker-compose.yml", "Dockerfile", "setup.sh", "scripts/z.sh", "a/b/c"]);
   });
 });
 
@@ -553,7 +597,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.8.1");
+    assert.equal(pkg.version, "0.9.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(job.params.tools.includes(t), `the job agent is granted ${t}`);
@@ -691,6 +735,42 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal((await space("noted"))?.note, "Run the lab's app first.");
     assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "noted" })).result, { deleted: "noted", left: [] });
     assert.deepEqual(await list(), before);
+  });
+
+  it("shows the Code app the files packages keep on a workspace's node, each version, and writes none", async () => {
+    const { nodeFilesAs } = await from<any>("node-files.ts");
+    await made(ada(), { name: "kept", repositories: [CODE], create: true });
+    const ref = (await refOf("Workspace", { name: "kept" }))!;
+    // The Code app's page reads them as ada, through strut's node/files: granted.
+    const call = ada();
+    const run = async (type: string, config: Record<string, unknown>) => {
+      const r = await call(type, config);
+      if (r.error) throw new Error(r.error);
+      return r.result;
+    };
+    assert.deepEqual(await foldersOn(run, ref), { folders: [] }, "none kept yet");
+    // Another package keeps its files on it, as stadeum/pods keeps a workspace's `.pod/`.
+    const theirs = nodeFilesAs(strut.services.nodeFiles, "acme/other");
+    await theirs.write(ref, { Dockerfile: "FROM node:22\n" }, { note: "first" });
+    await theirs.write(ref, { Dockerfile: "FROM node:24\n", "setup.sh": "npm ci\n", "logo.png": new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]) });
+    const found = await foldersOn(run, ref);
+    assert.ok("folders" in found, JSON.stringify(found));
+    assert.deepEqual(
+      found.folders.map((f) => [f.package, f.versions.map((v) => [v.version, v.paths.sort()])]),
+      [["acme/other", [[2, ["Dockerfile", "logo.png", "setup.sh"]], [1, ["Dockerfile"]]]]],
+    );
+    assert.equal(found.folders[0]!.versions[1]!.note, "first");
+    const newest = await readFolder(run, ref, "acme/other");
+    assert.equal(newest.version, 2);
+    assert.equal(newest.files["Dockerfile"], "FROM node:24\n");
+    assert.deepEqual(shown(newest.files["logo.png"]), { bytes: 5 }, "a file that isn't text, by its size");
+    assert.deepEqual((await readFolder(run, ref, "acme/other", 1)).files, { Dockerfile: "FROM node:22\n" });
+    // Read only: the page writes no files on a node.
+    assert.match((await call("node/write-files", { ref_id: ref, files: { x: "y" } })).error ?? "", /not granted to this app/);
+    // An empty newest version, as pods writes for a workspace made again: nothing to show.
+    await theirs.write(ref, {});
+    assert.deepEqual(await foldersOn(run, ref), { folders: [] });
+    assert.deepEqual((await ada()("stadeum/code/delete", { workspace: "kept" })).result, { deleted: "kept", left: [] });
   });
 
   it("refuses a change from any app but the Code app, and from a run that is nobody's", async () => {

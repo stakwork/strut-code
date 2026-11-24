@@ -13,6 +13,9 @@ grants:
   # which whatever sets it up starts: right after Set up the app opens Jamie
   # there, and each card links it (src/chat.ts). A strut without `about`
   # (stakwork/strut#858) refuses a package's page, and there is no link.
-  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete, conversation/list]
+  # Strut's `node/files` reads what packages keep on a workspace's node,
+  # such as its setup (pods' `.pod/`), for each card's files (src/files.ts):
+  # read only, and naming no package.
+  steps: [stadeum/code/repositories, stadeum/code/workspace, stadeum/code/default-workspace, stadeum/code/rename, stadeum/code/delete, conversation/list, node/files]
   sqlite: false
   automations: []

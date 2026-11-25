@@ -234,9 +234,13 @@ it acts:
    the checkout, and the reply says plainly that nothing was run here.
 5. **It ends in a pull request as the person**, on a new branch, never a
    push to the default branch; a later turn's change lands in the same
-   pull request. When the branch can't be pushed (the person's account
-   for that host isn't connected to the box, or can't push there), the
-   reply says so in plain words and hands over the diff.
+   pull request. An item of a plan (strut's `Plan` page,
+   stakwork/strut#809) works on the branch its brief names, the plan's one
+   branch in that repository, and opens a pull request only if none is
+   open, so a plan ends as one pull request per repository. When the
+   branch can't be pushed (the person's account for that host isn't
+   connected to the box, or can't push there), the reply says so in plain
+   words and hands over the diff.
 6. **The pull request's checks** run the change where nothing here can:
    an Android build on a pod without Android, or any change made without
    a pod. The agent reads them with the forge's tool (`github_pr_status`,
@@ -269,6 +273,11 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.10.1** The `Code Change` page: an item of a plan uses the branch its
+  brief names and opens a pull request only if none is open (strut's
+  `plans/orchestrator-plans.md`, "Outside this repo"). Two phrases are
+  cut to keep the page under the 6,000 characters strut shows. Like
+  0.10.0, not for `stable` until stakwork/strut#886 is released.
 - **0.10.0** The `Recent Workspaces` page under strut's `Recent Work`, and
   its read step `stadeum/code/recent`: every agent turn opens with the
   box's workspaces, the ones the person chatted about first. Needs

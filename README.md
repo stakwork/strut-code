@@ -203,32 +203,37 @@ it acts:
 1. **Find the repository** with `repositories`: in a workspace, among what
    the person's accounts reach, or by the address they gave. With several
    and none named, it asks. It calls it even when the launch already
-   checked the repositories out, since a deeper change picks its
-   workspace from it.
-2. **Small or deeper**, decided before the work is planned, since it
-   decides where the work runs. One test: can a person tell whether the
-   change is right from its diff alone? A colour, a size, a label or
-   wording is small. Anything only running it can judge is deeper. A
-   checkout in the job's directory installs, builds and tests nothing,
-   and a brief that says to run the tests says what to run, not where
+   checked the repositories out, since its workspaces decide where the
+   work runs.
+2. **Pod or checkout**, decided before the work is planned. A pod
+   whenever a ready workspace holds the repository, however small the
+   change, so the person sees it working (the owner's rule, 2026-11-25:
+   a small visual change came back from a checkout untested, where a
+   screenshot would have shown it). With none ready, one test: can a
+   person tell whether the change is right from its diff alone? A
+   colour, a size, a label or wording is small, and no workspace is set
+   up for it. Anything only running it can judge is deeper. A checkout
+   in the job's directory installs, builds and tests nothing, and a
+   brief that says to run the tests says what to run, not where
    (2026-11-23: a job on the stakwork box ran `yarn install` in strut's
    own container, its brief from the chat turn saying to run the tests).
-3. **A small change needs no pod, no tests and no workspace** (the
-   owner's rule, as Hive works): `git_checkout` into the job's directory,
+3. **A small change with no ready workspace needs no pod and no tests**:
+   `git_checkout` into the job's directory,
    the edit, then `git_push` from the absolute path the checkout returned,
    to a new branch, as the person. Then `git_pull_request`, which opens it
    with the step of the forge that serves the repository's host. With
    none, the reply says the branch is pushed and where. One that turns out
    deeper moves to a pod, and the reply says why.
-4. **A deeper change goes on a pod** from `stadeum/pods`, claimed for a
-   workspace: the smallest ready one (baked: it has a page) that holds the
-   repository, else the smallest that holds it. When none does, the agent
+4. **On a pod** from `stadeum/pods`, claimed for a workspace: the
+   smallest ready one (baked: it has a page) that holds the repository,
+   else, for a deeper change, the smallest that holds it. When none does, the agent
    makes one with `workspace` and sets it up in the same job. Its first
    message names the workspace and why, so the person can correct it in
    words. The page doesn't restate how to work in a pod: it sends the agent
    to the pods package's `Pod` page, another kind under `Job`, which it
-   opens by name. The app and its tests run there, and the pod's `git`
-   pushes and opens the pull request. A workspace's setup (`.pod/`) is the
+   opens by name. The app and its tests run there, a change a person can
+   see comes back as a screenshot, and the pod's `git` pushes and opens
+   the pull request. A workspace's setup (`.pod/`) is the
    workspace's, kept on the box at the bake: it goes in no pull request.
    Without the pods package, or when the claim fails, the change is made in
    the checkout, and the reply says plainly that nothing was run here.
@@ -273,6 +278,11 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.10.2** The `Code Change` page: a change of any size goes on a pod
+  when a ready workspace holds the repository, and a change a person can
+  see comes back with a screenshot. A checkout is left for a small change
+  with no ready workspace. Three phrases are cut to keep the page under
+  the 6,000 characters strut shows.
 - **0.10.1** The `Code Change` page: an item of a plan uses the branch its
   brief names and opens a pull request only if none is open (strut's
   `plans/orchestrator-plans.md`, "Outside this repo"). Two phrases are

@@ -13,29 +13,28 @@ YOUR GOAL IS TO WRITE CLEAN, GENERIC CODE! Internalize this fact: we cannot yet 
 ## 1. Find the repository
 
 Call `stadeum_code_repositories`, even when repositories are already
-checked out in your directory: a deeper change (4) picks its workspace
-from it. Take the one the person means: in a workspace, in `reachable`
+checked out in your directory: its workspaces decide where the work
+runs (2). Take the one the person means: in a workspace, in `reachable`
 (what their own accounts reach), or the https address they gave. When
 they named none and several fit, ask first. One none of these has, with
 no address, this box can't reach as them: say so, and that they connect
 the account that reads it.
 
-## 2. Small or deeper
+## 2. Pod or checkout
 
-Decide this first: it decides where the work runs. One test: can a
-person tell whether the change is right from its diff alone?
+Decide this first. A pod runs the app, so the change is seen working:
+use one whenever a ready workspace (4) holds the repository, however
+small the change. With none ready, can a person tell from its diff
+alone whether the change is right?
 
 - **Small:** yes. A colour, a size, a label, wording, a constant, in one
-  place or two. No pod, no tests.
+  place or two. A checkout (3).
 - **Deeper:** anything only running it can judge: behaviour, logic, data,
   a dependency, the build, a change across several files or areas. It
-  goes on a pod, where the app and its tests run, never a checkout in
-  your directory, whatever the message asks. A detailed request is
-  still deeper.
+  goes on a pod, never a checkout in your directory, whatever the
+  message asks. A detailed request is still deeper.
 
 ## 3. A small change, in a checkout
-
-It needs no workspace.
 
 1. `git_checkout { repo: <url>, workdir: <your job id> }`.
 2. Find the place and make the edit. Install, build and test nothing.
@@ -47,14 +46,14 @@ It needs no workspace.
    branch>, message }`.
 5. Open the pull request with `git_pull_request { url, head: <your
    branch>, base: <the default branch>, title, body }`, which opens it
-   as the person on the forge that serves the repository's host. When
-   none here opens pull requests for that host, say the branch is pushed
-   (its name, on `url`) and that this box can't open it.
+   as the person. When none here opens pull requests for its host, say
+   the branch is pushed (its name, on `url`) and that this box can't
+   open it.
 
 Its claim is checked by the person, on the pull request (an external
 check): nothing runs it here.
 
-## 4. A deeper change, on a pod
+## 4. On a pod
 
 **Pick the workspace.** A pod is claimed for a workspace, which holds
 the repositories the change needs to run. Of the workspaces whose
@@ -68,20 +67,20 @@ this job (below).
 
 **Say which in your first message,** before the work: the workspace,
 its repositories, and why it was chosen (or made). The person can
-correct you in words, and you move to the one they name.
+correct you in words.
 
 Claim a pod (`stadeum_pods_claim`) for it. Once you hold it, open the
 `Pod` page (`graph_graph_get { node_type: "Concept", name: "Pod" }`) and
 work as it says, with the pod tools. Make the change, run the app and its
-tests, and look at it in the browser. Commit it on a new branch and push
-with the pod's `git` (`push -u origin <branch>`, with `pr`): that opens
-the pull request.
+tests, and look at it in the browser. A change a person can see goes in
+`artifacts` as a screenshot. Commit it on a new branch and push with the
+pod's `git` (`push -u origin <branch>`, with `pr`): that opens the pull
+request.
 
-A workspace never set up (the claim gives a bare pod, with no image),
-yours or one you just made, is set up on the way, as the `Pod` page
-says. Its setup (`/workspaces/.pod`) is the workspace's, kept on the box
-when it is baked: it goes in no pull request, which holds the change
-alone. Say in `text` that you set it up.
+A workspace never set up (the claim gives a bare pod, with no image) is
+set up on the way, as the `Pod` page says. Its setup (`/workspaces/.pod`)
+is the workspace's, kept on the box when it is baked: it goes in no pull
+request, which holds the change alone. Say in `text` that you set it up.
 
 A tool the build needs that the pod can run (a Rust toolchain for one
 crate of a Node app) goes in the workspace's image (`.pod/`'s

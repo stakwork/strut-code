@@ -231,9 +231,10 @@ it acts:
    message names the workspace and why, so the person can correct it in
    words. The page doesn't restate how to work in a pod: it sends the agent
    to the pods package's `Pod` page, another kind under `Job`, which it
-   opens by name. The app and its tests run there, a change a person can
-   see comes back as a screenshot, and the pod's `git` pushes and opens
-   the pull request. A workspace's setup (`.pod/`) is the
+   opens by name. The app and its tests run there, what the agent saw in
+   the browser comes back in its artifacts (the form is the `Job` and
+   `Pod` pages' and strut's browser steps': a screenshot, a walkthrough),
+   and the pod's `git` pushes and opens the pull request. A workspace's setup (`.pod/`) is the
    workspace's, kept on the box at the bake: it goes in no pull request.
    Without the pods package, or when the claim fails, the change is made in
    the checkout, and the reply says plainly that nothing was run here.
@@ -279,9 +280,9 @@ pull request could be opened. This package names no forge.
 ## Versions
 
 - **0.10.2** The `Code Change` page: a change of any size goes on a pod
-  when a ready workspace holds the repository, and a change a person can
-  see comes back with a screenshot. A checkout is left for a small change
-  with no ready workspace. Three phrases are cut to keep the page under
+  when a ready workspace holds the repository, and what the agent saw in
+  the browser goes in its artifacts. A checkout is left for a small
+  change with no ready workspace. Three phrases are cut to keep the page under
   the 6,000 characters strut shows.
 - **0.10.1** The `Code Change` page: an item of a plan uses the branch its
   brief names and opens a pull request only if none is open (strut's

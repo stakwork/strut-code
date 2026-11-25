@@ -72,10 +72,9 @@ correct you in words.
 Claim a pod (`stadeum_pods_claim`) for it. Once you hold it, open the
 `Pod` page (`graph_graph_get { node_type: "Concept", name: "Pod" }`) and
 work as it says, with the pod tools. Make the change, run the app and its
-tests, and look at it in the browser. A change a person can see goes in
-`artifacts` as a screenshot. Commit it on a new branch and push with the
-pod's `git` (`push -u origin <branch>`, with `pr`): that opens the pull
-request.
+tests, and look at it in the browser. What you saw goes in `artifacts`.
+Commit it on a new branch and push with the pod's `git` (`push -u origin
+<branch>`, with `pr`): that opens the pull request.
 
 A workspace never set up (the claim gives a bare pod, with no image) is
 set up on the way, as the `Pod` page says. Its setup (`/workspaces/.pod`)

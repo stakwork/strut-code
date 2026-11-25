@@ -38,7 +38,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { address, askRemote, defaultWorkspace, noteOf, reach, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
+import { address, askRemote, defaultWorkspace, noteOf, reach, recentItems, refusal, remoteProblem, workspaceName, type Reach } from "./steps/_code.ts";
 import { addressToAdd } from "./apps/code/src/input.ts";
 import { chatAbout, lookForChat } from "./apps/code/src/chat.ts";
 import { foldersOn, ordered, readFolder, shown } from "./apps/code/src/files.ts";
@@ -205,6 +205,37 @@ describe("an address, a name and the default workspace", () => {
     assert.equal(noteOf("x".repeat(4000)), "x".repeat(4000));
     assert.throws(() => noteOf("x".repeat(4001)), /4001 characters: at most 4000 go on a workspace/);
     assert.throws(() => noteOf(42), /a workspace's note is text/);
+  });
+
+  it("lists the workspaces for strut's Recent Work: the ones the person chatted about first, newest day first, then by name", () => {
+    const list = {
+      repositories: [],
+      workspaces: [
+        { ref_id: "w1", name: "alpha", repositories: ["https://github.com/a/one", "https://gitlab.example.com:8443/g/sub/two"] },
+        { ref_id: "w2", name: "beta", repositories: ["https://github.com/a/three"] },
+        { ref_id: "w3", name: "gamma", repositories: ["https://github.com/a/four"] },
+        { ref_id: "w4", name: "delta", repositories: [] },
+      ],
+    };
+    const chats = [
+      { about: "w3", updatedAt: "2026-11-20T09:00:00.000Z" },
+      { about: "w3", updatedAt: "2026-11-25T09:00:00.000Z" },
+      // The same day: by name, so a later chat that day changes nothing strut shows.
+      { about: "w2", updatedAt: "2026-11-24T23:00:00.000Z" },
+      { about: "w1", updatedAt: "2026-11-24T01:00:00.000Z" },
+      // About no workspace here, about nothing, or with no time: not one of these.
+      { about: "elsewhere", updatedAt: "2026-11-26T00:00:00.000Z" },
+      { updatedAt: "2026-11-26T00:00:00.000Z" },
+      { about: "w4" },
+    ];
+    assert.deepEqual(recentItems(list, chats), [
+      { name: "gamma", what: "you chatted about it; github.com/a/four", at: "2026-11-25T09:00:00.000Z" },
+      { name: "alpha", what: "you chatted about it; github.com/a/one, gitlab.example.com:8443/g/sub/two", at: "2026-11-24T01:00:00.000Z" },
+      { name: "beta", what: "you chatted about it; github.com/a/three", at: "2026-11-24T23:00:00.000Z" },
+      { name: "delta", what: "on this server" },
+    ]);
+    // No chats (a run that is nobody's, a strut that can't say): every one, by name.
+    assert.deepEqual(recentItems(list, []).map((i) => i.name), ["alpha", "beta", "delta", "gamma"]);
   });
 
   it("finds the viewer's chat about a workspace by its node, and none on a strut that doesn't know about", async () => {
@@ -597,7 +628,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const { packages } = await (await strut.app.request("/packages")).json();
     const pkg = packages.find((p: any) => p.package === "stadeum/code");
     assert.ok(pkg, "installed");
-    assert.equal(pkg.version, "0.9.0");
+    assert.equal(pkg.version, "0.10.0");
     assert.equal(pkg.requires?.binaries, undefined, "it runs no git of its own");
     const job = await strut.workspace.getWorkflow("job");
     for (const t of ["stadeum/code/repositories", "stadeum/code/workspace", "git/push", "git/pull-request"]) assert.ok(job.params.tools.includes(t), `the job agent is granted ${t}`);
@@ -629,6 +660,14 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.match(root.properties.description, /a page for each workspace that has been baked/);
   });
 
+  it("ships the Recent Workspaces page under strut's Recent Work, naming its read step, its text the file's", async () => {
+    const root = await once("recent-pages", "graph/graph-get", { node_type: "Concept", name: "Recent Work", children: "PARENT_OF" });
+    assert.ok(root.children.some((c: any) => c.name === "Recent Workspaces"), "a page under Recent Work");
+    const page = await concept("Recent Workspaces");
+    assert.equal(page.properties.step, "stadeum/code/recent");
+    assert.equal(page.properties.docs.trim(), await pageText("Recent Workspaces"));
+  });
+
   it("opens a Code Change job's turn with the page, the kind listed and its tools granted", async () => {
     const before = turns.length;
     const message = "Make the Add button blue.";
@@ -642,6 +681,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     const head = `Your job id: code-change-kind. ${kindLead}`;
     const at = turn.prompt.indexOf(head);
     assert.ok(at >= 0, turn.prompt.slice(0, 300));
+    // Before it, strut's Recent Work, this package's page among it.
+    assert.ok(turn.prompt.slice(0, at).includes(`Recent Workspaces:\n${await pageText("Recent Workspaces")}`), turn.prompt.slice(0, at));
     assert.ok(turn.prompt.endsWith(`${kindEnd}${message}`), turn.prompt.slice(-200));
     const section = turn.prompt.slice(at + head.length, turn.prompt.length - kindEnd.length - message.length);
     assert.match(section, /"Code Change" Concept/);
@@ -1011,6 +1052,33 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.match(JSON.stringify(refused.error), /dan has no access to it/);
   });
 
+  it("lists the workspaces for strut's Recent Work as the person: the ones they chatted about first, then the rest by name", async () => {
+    const spaces = (await list()).workspaces.sort((a, b) => a.name.localeCompare(b.name));
+    const team = spaces.find((w) => w.name === "team")!;
+    const repos = (w: { repositories: string[] }) => w.repositories.map((url) => url.replace(/^https:\/\//, "")).join(", ");
+    // eve's chat about `team`, as the package that sets workspaces up starts one at Set up (strut's conversation/start).
+    await strut.services.conversations.launched("eve/team-chat", {
+      runId: "run-eve-team",
+      workflow: "orchestrator",
+      actor: "eve",
+      principal: "eve",
+      prompt: "Set up team",
+      opens: { title: "Set up team", about: team.ref_id, from: "stadeum/pods" },
+    });
+    const eve = (await once("recent-eve", "stadeum/code/recent", {}, "eve")).items;
+    const { at, ...first } = eve[0];
+    assert.ok(!Number.isNaN(Date.parse(at)), `when the chat last changed: ${at}`);
+    assert.deepEqual(
+      [first, ...eve.slice(1)],
+      [{ name: "team", what: `you chatted about it; ${repos(team)}` }, ...spaces.filter((w) => w !== team).map((w) => ({ name: w.name, what: `on this server; ${repos(w)}` }))],
+    );
+    // Someone with no chat about any: every workspace, by name.
+    assert.deepEqual((await once("recent-dan", "stadeum/code/recent", {}, "dan")).items, spaces.map((w) => ({ name: w.name, what: `on this server; ${repos(w)}` })));
+    // What eve's next turn opens with: strut's section, this page with team first.
+    const { text } = await once("recent-section", "context/recent", { name: "Recent Work" }, "eve");
+    assert.ok(text.includes(`Recent Workspaces:\n${await pageText("Recent Workspaces")}\n- team: you chatted about it; ${repos(team)} (${at.slice(0, 10)})`), text);
+  });
+
   it("pushes a Code Change job's small change to a new branch as the job's person, refused the default branch, and opens its pull request", async () => {
     // A file to change on the private repository's default branch, trunk.
     const bare = join(root, "remotes", "team", "secret");
@@ -1100,7 +1168,7 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     for (const token of [TOKEN, WRONG]) assert.equal(all.includes(token), false, "a token is never said");
   });
 
-  it("goes with the package: the Code Change page, its place under Job and the job's tools; Codebase stays while a page hangs under it", async () => {
+  it("goes with the package: the Code Change page, its place under Job, the Recent Workspaces page and the job's tools; Codebase stays while a page hangs under it", async () => {
     const res = await strut.app.request("/packages/stadeum/code", { method: "DELETE", headers: { "x-strut-actor": "root" } });
     const body = await res.json();
     assert.equal(res.status, 200, JSON.stringify(body));
@@ -1112,6 +1180,8 @@ describe("stadeum/code on strut", { timeout: 300_000 }, () => {
     assert.equal((await concept("Codebase")).name, "Codebase");
     const job = await once("job-kinds-after", "graph/graph-get", { node_type: "Concept", name: "Job", children: "PARENT_OF" });
     assert.equal(job.children.find((c: any) => c.name === PAGE), undefined, "no longer a kind");
+    const recent = await once("recent-pages-after", "graph/graph-get", { node_type: "Concept", name: "Recent Work", children: "PARENT_OF" });
+    assert.equal(recent.children.find((c: any) => c.name === "Recent Workspaces"), undefined, "no longer under Recent Work");
     const gone = await once("code-change-page-after", "graph/graph-get", { node_type: "Concept", name: PAGE });
     assert.match(String(gone), /node not found: Concept "Code Change"/);
     const tools = (await strut.workspace.getWorkflow("job")).params.tools;

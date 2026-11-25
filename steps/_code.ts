@@ -207,6 +207,54 @@ export function view(list: List) {
   };
 }
 
+// ── strut's Recent Work ───────────────────────────────────────────────────
+
+/** One of a person's chats, as strut's `conversation/list` gives it: the
+ *  node it is about, when a package started it about one, and when it last
+ *  changed. */
+export interface Chat {
+  about?: unknown;
+  updatedAt?: unknown;
+}
+
+/** The items of the `Recent Workspaces` page (`stadeum/code/recent`, under
+ *  strut's `Recent Work`): each workspace with its repositories as
+ *  `host/owner/name`. The ones the person's chats are about come first,
+ *  the newest day first, then the rest by name. Ordered by the day alone,
+ *  which is what strut shows, so the list changes only when what it shows
+ *  does: strut sends it again only then. */
+export function recentItems(list: List, chats: readonly Chat[]) {
+  const last = new Map<string, string>();
+  for (const c of chats) {
+    if (typeof c.about !== "string" || typeof c.updatedAt !== "string") continue;
+    if (c.updatedAt > (last.get(c.about) ?? "")) last.set(c.about, c.updatedAt);
+  }
+  return list.workspaces
+    .map((w) => ({ w, at: last.get(w.ref_id) }))
+    .sort((a, b) => (b.at ?? "").slice(0, 10).localeCompare((a.at ?? "").slice(0, 10)) || a.w.name.localeCompare(b.w.name))
+    .map(({ w, at }) => ({
+      name: w.name,
+      what: [at ? "you chatted about it" : "on this server", w.repositories.map((url) => url.replace(/^https:\/\//, "")).join(", ")].filter(Boolean).join("; "),
+      ...(at ? { at } : {}),
+    }));
+}
+
+/** The run's person's chats (strut's `conversation/list`): none for a run
+ *  that is nobody's, or where strut can't say (an older strut, another
+ *  app's page). */
+async function chatsOf(ctx: Ctx): Promise<Chat[]> {
+  const def = ctx.registry?.["conversation/list"];
+  if (!ctx.actor || !def) return [];
+  const out = (await def.run(def.input.parse({}), ctx).catch(() => undefined)) as { conversations?: unknown } | undefined;
+  return Array.isArray(out?.conversations) ? out.conversations : [];
+}
+
+/** `stadeum/code/recent`: the workspaces the person most likely means. */
+export async function recent(ctx: Ctx) {
+  const [list, chats] = await Promise.all([readList(ctx), chatsOf(ctx)]);
+  return { items: recentItems(list, chats) };
+}
+
 /** Set up's "Additional information" as it is kept: trimmed, none when
  *  empty, refused over NOTE_MOST characters. Line breaks stay: it is the
  *  person's own words, which whatever sets the workspace up reads. */

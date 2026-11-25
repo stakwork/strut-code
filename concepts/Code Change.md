@@ -14,13 +14,11 @@ YOUR GOAL IS TO WRITE CLEAN, GENERIC CODE! Internalize this fact: we cannot yet 
 
 Call `stadeum_code_repositories`, even when repositories are already
 checked out in your directory: a deeper change (4) picks its workspace
-from it. It gives the box's workspaces, each with its `repositories`,
-and `reachable`: every repository the person's own accounts reach. Take
-the one the person means: in a workspace, in `reachable`, or the https
-address they gave. When they named none and several fit, ask before
-anything else. A repository none of these has, and no address for it,
-is one this box can't reach as them: say so, and that they connect the
-account that reads it.
+from it. Take the one the person means: in a workspace, in `reachable`
+(what their own accounts reach), or the https address they gave. When
+they named none and several fit, ask first. One none of these has, with
+no address, this box can't reach as them: say so, and that they connect
+the account that reads it.
 
 ## 2. Small or deeper
 
@@ -48,14 +46,13 @@ It needs no workspace.
    path: <the absolute path git_checkout returned>, branch: <a new
    branch>, message }`.
 5. Open the pull request with `git_pull_request { url, head: <your
-   branch>, base: <the default branch>, title, body }`. It opens it on
-   the forge that serves the repository's host, as the person. When it
-   says no forge here opens pull requests for that host, say the branch
-   is pushed (its name, on `url`) and that this box can't open the pull
-   request.
+   branch>, base: <the default branch>, title, body }`, which opens it
+   as the person on the forge that serves the repository's host. When
+   none here opens pull requests for that host, say the branch is pushed
+   (its name, on `url`) and that this box can't open the pull request.
 
-Its claim is checked by the person looking at the pull request (an
-external check): nothing runs it here.
+Its claim is checked by the person, on the pull request (an external
+check): nothing runs it here.
 
 ## 4. A deeper change, on a pod
 
@@ -83,13 +80,13 @@ the pull request.
 A workspace never set up (the claim gives a bare pod, with no image),
 yours or one you just made, is set up on the way, as the `Pod` page
 says. Its setup (`/workspaces/.pod`) is the workspace's, kept on the box
-when it is baked: it goes in no pull request, so the pull request holds
-the change alone. Say in `text` that you set it up.
+when it is baked: it goes in no pull request, which holds the change
+alone. Say in `text` that you set it up.
 
 A tool the build needs that the pod can run (a Rust toolchain for one
-crate of a Node app) goes in the workspace's image, not this job's shell:
-`.pod/`'s `Dockerfile`, then bake, as the `Pod` page says, so every later
-job has it.
+crate of a Node app) goes in the workspace's image (`.pod/`'s
+`Dockerfile`, then bake), not this job's shell, so every later job has
+it.
 
 No pod (no `stadeum_pods_claim` among your tools, or the claim fails), or
 an app a pod can't run (a phone app; a platform or an architecture the
@@ -109,31 +106,22 @@ request's checks (6) are then what runs it.
   the change's diff as a file so nothing is lost.
 - A push or pull request refused for want of the person's credentials
   (`no_push_permission:`, or a token that isn't set) means their account
-<<<<<<< Updated upstream
   for that host isn't connected to this box, or can't push there: ask
-  them to connect it, or to get access, then to ask again.
+  them to connect it or get access, then ask again.
 
 ## 6. The pull request's checks
 
 The repository's CI runs the change too, including what nothing here can
-run (a build or a platform this box or the pod lacks). Once the pull
-request is open, read its checks with your tool for the repository's host
-(`github_pr_status` for github.com):
+(a build or a platform this box or the pod lacks). Once the pull request
+is open, read its checks with your tool for its host (`github_pr_status`
+for github.com):
 
 - Still running when you're done: say so, with the link. Don't wait on
-  them; the person can ask you to look again. If they fail later, strut
-  sends you one turn to fix them ("Strut sent this when the checks
-  finished"), and its end reaches the person.
+  them. If they fail later, strut sends you one turn to fix them ("Strut
+  sent this when the checks finished"), and its end reaches the person.
 - Failed: it's yours. Read why (`logs: true`), fix it on the same branch,
   push, and say what failed and what you changed.
 - Passed: say what they ran. The change is tested only by what you saw
   pass, here or there.
 
 What reviewers said on the pull request is `github_fetch_pr`'s.
-=======
-  for that host isn't connected to this box, or can't push to that
-  repository. Ask them to connect their account for that host, or to get
-  access, then to ask again.
-
-YOUR GOAL IS TO WRITE CLEAN, GENERIC CODE! Internalize this fact: we cannot yet imagine the integrations, features, user stories, etc that we'll build later - so keep things neutral and modular. Always look for opportunities to simplify
->>>>>>> Stashed changes

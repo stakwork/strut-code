@@ -19,6 +19,7 @@ secret.
 | `graph/Repository.yaml`, `graph/Workspace.yaml` | The two graph types, and the `Workspace -[INCLUDES]-> Repository` link |
 | `concepts/Repositories.md` | The `Repositories` page: the contract another package reads these nodes by (each field, the link, a workspace's page) |
 | `concepts/Code Change.md` | The `Code Change` page, a kind of job under strut's `Job`: how a change to one of the box's repositories is made and how it ends (below) |
+| `concepts/Recent Workspaces.md` | The `Recent Workspaces` page, under strut's `Recent Work`: every agent turn opens with the box's workspaces and their repositories, the ones the person chatted about lately first (below) |
 | `concepts/Codebase.md` | The `Codebase` page, a root: short, and it stays as it is. Under it go a page for each workspace that has been baked, and later a page for each repository and each feature |
 | `apps/code/` | **Code**, every person's app, about making workspaces: a card for each, with its repositories, each with its branch and when it was last checked, a link to its page once it is baked, a link to the viewer's chat about it, and its files, such as its setup, once a package keeps some on it (`src/files.ts`). **New workspace** takes a name and repositories ticked from what the viewer's accounts reach (strut's `git/repositories`) or added by address. It and the suggested default's **Set up** take optional **Additional information**, and right after either the app opens Jamie in the chat about the new workspace (`src/chat.ts`). A card's menu adds repositories, renames and deletes; a repository is taken out with its ×. Opened with an address (`add`), it opens New workspace with it filled in (`src/input.ts`) |
 | `workflows/check.yaml` | Every 15 minutes (`schedules:` in `strut.yaml`): `heads`, then `ingest` on each repository whose head is not ingested. It writes no workspace |
@@ -27,6 +28,7 @@ secret.
 | `steps/workspace.ts` | The job agent's tool and the app's New workspace and changes: make a workspace, or put repositories in one or take them out, as the caller |
 | `steps/rename.ts`, `delete.ts` | The app's Rename and Delete |
 | `steps/default-workspace.ts` | The suggested default workspace's **Set up**, a person's press in the Code app |
+| `steps/recent.ts` | The `Recent Workspaces` page's read step, which strut runs as the person before each turn |
 | `steps/heads.ts` | `check`'s pass: strut's `git/remote-head` on each remote, four at a time, as the run's person |
 | `steps/record.ts` | `ingest`'s step: the head, recorded as ingested |
 | `strut.yaml` `job:` | The job agent's tools: `repositories` and `workspace`, and strut's own `git/push` and `git/pull-request` |
@@ -164,6 +166,31 @@ without `git/pull-request` refuses the install, since `job:` grants it. Do
 not promote this to `stable` until #851 is merged and released: the
 Software bundle follows `stable`.
 
+## Recent Workspaces
+
+Strut opens each orchestrator and job turn with `Recent Work`
+(stakwork/strut#886, its `plans/recent-work.md`): what the person most
+likely means, so "the stadeum repo" is matched before anything is
+searched or asked. A package adds a list by shipping a page under it that
+names a read step. This one's is `Recent Workspaces`, whose `step`,
+`stadeum/code/recent`, strut runs as the person:
+
+- **Every workspace, with its repositories** as `host/owner/name`, as
+  strut's own `Recent Jobs` names them. A workspace is the box's, not one
+  person's, so a new person sees them all.
+- **The ones the person chatted about first.** A chat about a workspace
+  is the one the package that sets it up starts at Set up (strut's
+  `conversation/list`, each chat's `about`), and `at` is the newest. Then
+  the rest by name.
+- **Ordered by the day alone,** which is what strut shows. Strut sends the
+  section again only when its text changes, so a chat later the same day
+  sends nothing new.
+
+The page's text says how to find the rest: `stadeum_code_repositories`
+for every workspace, `git_checkout` for a repository. It names a tool the
+job agent has; the orchestrator matches the name and puts the repository
+in the job's `repos`.
+
 ## A Code Change job
 
 A job's `kind` names a page under strut's `Job`, and every turn of the
@@ -242,6 +269,17 @@ pull request could be opened. This package names no forge.
 
 ## Versions
 
+- **0.10.0** The `Recent Workspaces` page under strut's `Recent Work`, and
+  its read step `stadeum/code/recent`: every agent turn opens with the
+  box's workspaces, the ones the person chatted about first. Needs
+  stakwork/strut#886: on an older strut there is no `Recent Work` to hang
+  under and the page is left unattached, and on a graph whose `Concept` type
+  jarvis seeded, strut keeps no `step`, so the page shows its text with
+  no list. **Do not promote 0.10.0 to `stable` until stakwork/strut#886
+  is released.**
+  The `Code Change` page loses the merge conflict 0.9.0's last commit
+  left in it, keeps that commit's paragraph on clean, generic code, and is
+  tightened to fit the 6,000 characters strut shows of a kind's page.
 - **0.9.0** Each workspace's card links **its files**: what packages keep
   on its node, such as its setup (pods' `.pod/`), each version, read only
   (strut's `node/files`, granted to the Code app's page).

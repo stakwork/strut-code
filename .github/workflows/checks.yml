@@ -48,9 +48,11 @@ jobs:
             echo "strut's main has no git/repositories yet: testing on plan/package-seams (stakwork/strut#851)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # strut's own version (its `engines`, its tests.yml): yarn refuses
+      # to install strut on any older Node.
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.22.1"
           cache: yarn
           cache-dependency-path: |
             strut/yarn.lock

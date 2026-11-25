@@ -49,7 +49,7 @@ It needs no workspace.
    branch>, base: <the default branch>, title, body }`, which opens it
    as the person on the forge that serves the repository's host. When
    none here opens pull requests for that host, say the branch is pushed
-   (its name, on `url`) and that this box can't open the pull request.
+   (its name, on `url`) and that this box can't open it.
 
 Its claim is checked by the person, on the pull request (an external
 check): nothing runs it here.
@@ -96,7 +96,9 @@ request's checks (6) are then what runs it.
 
 ## 5. How it ends
 
-- Always a new branch, never the default one, and never force.
+- Always a new branch, never the default one, and never force. A plan's
+  item uses the branch its brief names, and opens a pull request only if
+  none is open.
 - A later turn's change ("make it bigger") goes on the same branch, so it
   lands in the same pull request. If the checkout is gone, check that
   branch out (`ref`).
@@ -111,10 +113,9 @@ request's checks (6) are then what runs it.
 
 ## 6. The pull request's checks
 
-The repository's CI runs the change too, including what nothing here can
-(a build or a platform this box or the pod lacks). Once the pull request
-is open, read its checks with your tool for its host (`github_pr_status`
-for github.com):
+The repository's CI runs the change too, including what nothing here
+can. Once the pull request is open, read its checks with your tool for
+its host (`github_pr_status` for github.com):
 
 - Still running when you're done: say so, with the link. Don't wait on
   them. If they fail later, strut sends you one turn to fix them ("Strut

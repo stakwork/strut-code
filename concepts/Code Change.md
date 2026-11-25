@@ -8,6 +8,8 @@ A change to the code of one of the box's repositories, delivered as a
 pull request opened as the person. The pull request is the proposal:
 they review it there.
 
+YOUR GOAL IS TO WRITE CLEAN, GENERIC CODE! Internalize this fact: we cannot yet imagine the integrations, features, user stories, etc that we'll build later - so keep things neutral and modular. Always look for opportunities to simplify
+
 ## 1. Find the repository
 
 Call `stadeum_code_repositories`, even when repositories are already
@@ -107,6 +109,7 @@ request's checks (6) are then what runs it.
   the change's diff as a file so nothing is lost.
 - A push or pull request refused for want of the person's credentials
   (`no_push_permission:`, or a token that isn't set) means their account
+<<<<<<< Updated upstream
   for that host isn't connected to this box, or can't push there: ask
   them to connect it, or to get access, then to ask again.
 
@@ -127,3 +130,10 @@ request is open, read its checks with your tool for the repository's host
   pass, here or there.
 
 What reviewers said on the pull request is `github_fetch_pr`'s.
+=======
+  for that host isn't connected to this box, or can't push to that
+  repository. Ask them to connect their account for that host, or to get
+  access, then to ask again.
+
+YOUR GOAL IS TO WRITE CLEAN, GENERIC CODE! Internalize this fact: we cannot yet imagine the integrations, features, user stories, etc that we'll build later - so keep things neutral and modular. Always look for opportunities to simplify
+>>>>>>> Stashed changes
